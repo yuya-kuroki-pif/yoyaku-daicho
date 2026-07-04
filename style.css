@@ -117,7 +117,9 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
   width: var(--label-w); min-width: var(--label-w);
   background: #f7fafb; border-right: 2px solid var(--line); border-bottom: 1px solid var(--line);
   padding: 6px 10px; display: flex; flex-direction: column; justify-content: center;
+  cursor: pointer;
 }
+.tt-line:not(.head) .tt-label:active { background: #e6f2f2; }
 .tt-label .tname { font-weight: 700; font-size: 15px; }
 .tt-label .tseats { font-size: 12px; color: var(--muted); }
 .tt-line.head .tt-label { background: var(--navy); border-bottom: none; z-index: 6; }

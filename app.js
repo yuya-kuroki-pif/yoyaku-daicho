@@ -171,6 +171,11 @@ function renderTimetable() {
     const label = document.createElement('div');
     label.className = 'tt-label';
     label.innerHTML = `<span class="tname">${esc(tb.name)}</span><span class="tseats">${tb.seats} ${esc(t('seatsUnit'))}</span>`;
+    // テーブル名をタップ → そのテーブルで新規予約
+    label.addEventListener('click', () => {
+      if (suppressClick) { suppressClick = false; return; }
+      openResModal(null, { tableId: tb.id });
+    });
     line.appendChild(label);
 
     const row = document.createElement('div');
