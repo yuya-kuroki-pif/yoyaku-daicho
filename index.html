@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>予約台帳 / Sổ đặt bàn</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🍽</span>
+      <span data-i18n="appTitle"></span>
+    </div>
+
+    <nav class="view-switch" id="viewSwitch">
+      <button class="vs-btn active" data-view="timetable" data-i18n="timetable"></button>
+      <button class="vs-btn" data-view="list" data-i18n="list"></button>
+      <button class="vs-btn" data-view="customers" data-i18n="customers"></button>
+    </nav>
+
+    <div class="topbar-right">
+      <div class="lang-switch" id="langSwitch">
+        <button data-lang="ja">日本語</button>
+        <button data-lang="vi">Tiếng Việt</button>
+      </div>
+      <button id="btnSettings" class="btn ghost" title="settings">⚙</button>
+      <button id="btnWalkIn" class="btn secondary">🚶 <span data-i18n="walkIn"></span></button>
+      <button id="btnNew" class="btn primary">＋ <span data-i18n="newReservation"></span></button>
+    </div>
+  </header>
+
+  <div class="datebar">
+    <div class="date-nav">
+      <button id="btnPrevDay" class="nav-btn">◀</button>
+      <button id="btnToday" class="btn ghost small" data-i18n="today"></button>
+      <input type="date" id="datePicker" class="date-input">
+      <button id="btnNextDay" class="nav-btn">▶</button>
+      <span class="date-display" id="dateDisplay"></span>
+    </div>
+    <div class="day-summary" id="daySummary"></div>
+  </div>
+
+  <main>
+    <section id="view-timetable" class="view">
+      <div class="tt-scroll" id="ttScroll"></div>
+      <div class="legend" id="legend"></div>
+    </section>
+
+    <section id="view-list" class="view hidden">
+      <div class="list-wrap" id="listWrap"></div>
+    </section>
+
+    <section id="view-customers" class="view hidden">
+      <div class="cust-toolbar">
+        <input type="search" id="custSearch" class="search-input" data-i18n-placeholder="searchPlaceholder">
+      </div>
+      <div class="cust-wrap" id="custWrap"></div>
+    </section>
+  </main>
+
+  <!-- Reservation modal -->
+  <div class="modal-backdrop hidden" id="resModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="resModalTitle"></h2>
+        <button class="icon-btn" id="btnResClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="status-row hidden" id="fStatusRow"></div>
+
+        <div class="form-grid">
+          <div class="field">
+            <label data-i18n="date"></label>
+            <input type="date" id="fDate">
+          </div>
+          <div class="field">
+            <label data-i18n="startTime"></label>
+            <select id="fStart"></select>
+          </div>
+          <div class="field">
+            <label data-i18n="stayTime"></label>
+            <select id="fDur"></select>
+          </div>
+
+          <div class="field">
+            <label data-i18n="adults"></label>
+            <div class="stepper">
+              <button type="button" class="step-btn" data-step="adults" data-d="-1">−</button>
+              <span class="step-val" id="fAdults">2</span>
+              <button type="button" class="step-btn" data-step="adults" data-d="1">＋</button>
+            </div>
+          </div>
+          <div class="field">
+            <label data-i18n="children"></label>
+            <div class="stepper">
+              <button type="button" class="step-btn" data-step="children" data-d="-1">−</button>
+              <span class="step-val" id="fChildren">0</span>
+              <button type="button" class="step-btn" data-step="children" data-d="1">＋</button>
+            </div>
+          </div>
+          <div class="field">
+            <label data-i18n="phone"></label>
+            <input type="tel" id="fPhone" data-i18n-placeholder="phonePlaceholder">
+          </div>
+
+          <div class="field">
+            <label data-i18n="name"></label>
+            <input type="text" id="fName">
+          </div>
+          <div class="field">
+            <label data-i18n="nameKana"></label>
+            <input type="text" id="fKana">
+          </div>
+          <div class="field">
+            <label data-i18n="course"></label>
+            <input type="text" id="fCourse">
+          </div>
+
+          <div class="field span3">
+            <label data-i18n="tablesLabel"></label>
+            <div class="table-chips" id="fTables"></div>
+          </div>
+
+          <div class="field span3">
+            <label data-i18n="memo"></label>
+            <textarea id="fMemo" rows="2"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn danger hidden" id="btnResDelete" data-i18n="delete"></button>
+        <span class="spacer"></span>
+        <button class="btn ghost" id="btnResCancel" data-i18n="cancelBtn"></button>
+        <button class="btn primary" id="btnResSave" data-i18n="save"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table settings modal -->
+  <div class="modal-backdrop hidden" id="settingsModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 data-i18n="settings"></h2>
+        <button class="icon-btn" id="btnSetClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="field">
+            <label data-i18n="openTime"></label>
+            <select id="sOpen"></select>
+          </div>
+          <div class="field">
+            <label data-i18n="closeTime"></label>
+            <select id="sClose"></select>
+          </div>
+        </div>
+        <div class="tbl-head">
+          <span data-i18n="tableName"></span>
+          <span data-i18n="seatsLabel"></span>
+          <span></span>
+        </div>
+        <div id="tblRows"></div>
+        <button class="btn ghost full" id="btnAddTable">＋ <span data-i18n="addTable"></span></button>
+      </div>
+      <div class="modal-footer">
+        <span class="spacer"></span>
+        <button class="btn ghost" id="btnSetCancel" data-i18n="cancelBtn"></button>
+        <button class="btn primary" id="btnSetSave" data-i18n="save"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
