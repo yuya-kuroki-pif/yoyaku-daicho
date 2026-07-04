@@ -2,9 +2,10 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#17384a">
   <title>予約台帳 / Sổ đặt bàn</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -12,7 +13,7 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-icon">🍽</span>
-      <span data-i18n="appTitle"></span>
+      <span class="brand-name" data-i18n="appTitle"></span>
     </div>
 
     <nav class="view-switch" id="viewSwitch">
@@ -27,8 +28,8 @@
         <button data-lang="vi">Tiếng Việt</button>
       </div>
       <button id="btnSettings" class="btn ghost" title="settings">⚙</button>
-      <button id="btnWalkIn" class="btn secondary">🚶 <span data-i18n="walkIn"></span></button>
-      <button id="btnNew" class="btn primary">＋ <span data-i18n="newReservation"></span></button>
+      <button id="btnWalkIn" class="btn secondary hide-phone">🚶 <span data-i18n="walkIn"></span></button>
+      <button id="btnNew" class="btn primary hide-phone">＋ <span data-i18n="newReservation"></span></button>
     </div>
   </header>
 
@@ -61,6 +62,17 @@
     </section>
   </main>
 
+  <!-- スマホ用 下部ナビ / FAB -->
+  <nav class="bottom-nav" id="bottomNav">
+    <button class="bn-btn active" data-view="timetable"><span class="bn-ic">🗓</span><span data-i18n="timetable"></span></button>
+    <button class="bn-btn" data-view="list"><span class="bn-ic">📋</span><span data-i18n="list"></span></button>
+    <button class="bn-btn" data-view="customers"><span class="bn-ic">👥</span><span data-i18n="customers"></span></button>
+  </nav>
+  <div class="fabs">
+    <button id="fabWalkIn" class="fab secondary" title="walk-in">🚶</button>
+    <button id="fabNew" class="fab primary" title="new">＋</button>
+  </div>
+
   <!-- Reservation modal -->
   <div class="modal-backdrop hidden" id="resModal">
     <div class="modal">
@@ -72,6 +84,7 @@
         <div class="status-row hidden" id="fStatusRow"></div>
 
         <div class="form-grid">
+          <h3 class="sec" data-i18n="secWhen"></h3>
           <div class="field">
             <label data-i18n="date"></label>
             <input type="date" id="fDate">
@@ -101,11 +114,14 @@
               <button type="button" class="step-btn" data-step="children" data-d="1">＋</button>
             </div>
           </div>
-          <div class="field">
-            <label data-i18n="phone"></label>
-            <input type="tel" id="fPhone" data-i18n-placeholder="phonePlaceholder">
+          <div class="field hide-phone-empty"></div>
+
+          <h3 class="sec" data-i18n="secTable"></h3>
+          <div class="field span3">
+            <div class="table-chips" id="fTables"></div>
           </div>
 
+          <h3 class="sec" data-i18n="secGuest"></h3>
           <div class="field">
             <label data-i18n="name"></label>
             <input type="text" id="fName">
@@ -115,16 +131,16 @@
             <input type="text" id="fKana">
           </div>
           <div class="field">
+            <label data-i18n="phone"></label>
+            <input type="tel" id="fPhone" data-i18n-placeholder="phonePlaceholder">
+          </div>
+
+          <h3 class="sec" data-i18n="secOther"></h3>
+          <div class="field">
             <label data-i18n="course"></label>
             <input type="text" id="fCourse">
           </div>
-
-          <div class="field span3">
-            <label data-i18n="tablesLabel"></label>
-            <div class="table-chips" id="fTables"></div>
-          </div>
-
-          <div class="field span3">
+          <div class="field span2">
             <label data-i18n="memo"></label>
             <textarea id="fMemo" rows="2"></textarea>
           </div>

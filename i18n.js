@@ -62,6 +62,12 @@ const I18N = {
     nameRequired: 'お名前を入力してください',
     walkInName: 'ウォークイン',
 
+    dragHint: '💡 予約は長押しして移動／右端をドラッグで滞在時間を変更',
+    secWhen: '日時・人数',
+    secTable: 'テーブル',
+    secGuest: 'お客様情報',
+    secOther: 'その他',
+
     weekdays: ['日', '月', '火', '水', '木', '金', '土'],
     fmtDate(y, m, d, wd) { return `${y}年${m}月${d}日（${this.weekdays[wd]}）`; },
     fmtDateShort(y, m, d) { return `${m}/${d}`; },
@@ -128,6 +134,12 @@ const I18N = {
     deleteConfirm: 'Xóa lượt đặt bàn này?',
     nameRequired: 'Vui lòng nhập tên khách',
     walkInName: 'Khách vãng lai',
+
+    dragHint: '💡 Giữ khối đặt bàn để di chuyển / kéo mép phải để đổi thời gian ở lại',
+    secWhen: 'Ngày giờ & số khách',
+    secTable: 'Bàn',
+    secGuest: 'Thông tin khách hàng',
+    secOther: 'Khác',
 
     weekdays: ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'],
     fmtDate(y, m, d, wd) { return `${this.weekdays[wd]}, ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`; },

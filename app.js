@@ -1,13 +1,18 @@
 'use strict';
 
 /* ===== 予約台帳 / Sổ đặt bàn =====
- * データはブラウザの localStorage に保存されます。
+ * タブレット・スマホ向け。データはブラウザの localStorage に保存されます。
+ * トレタ風の操作:
+ *  - 空きマスをタップ → その時間・テーブルで新規予約
+ *  - 予約ブロックをタップ → 詳細・編集
+ *  - 予約ブロックを長押し（PCはドラッグ）→ 配席移動・時間変更
+ *  - ブロック右端をドラッグ → 滞在時間の変更
  */
 
 const LS_KEY = 'yoyaku-daicho-v1';
 const SLOT_MIN = 30;   // タイムテーブルの1マス（分）
-const SLOT_W = 56;     // 1マスの幅(px) — style.css の --slot-w と一致させること
-const LABEL_W = 136;   // テーブル名列の幅(px) — style.css の --label-w と一致させること
+const SNAP_MIN = 15;   // ドラッグ時のスナップ単位（分）
+const LONG_PRESS_MS = 400;
 
 const STATUSES = ['reserved', 'seated', 'finished', 'noshow', 'cancelled'];
 
@@ -19,6 +24,10 @@ let modalStatus = 'reserved';  // モーダル内で選択中のステータス
 let modalTables = new Set();   // モーダル内で選択中のテーブルID
 let modalWalkIn = false;
 
+let ttCtx = null;              // タイムテーブル描画コンテキスト（ドラッグ用）
+let drag = null;               // 進行中のドラッグ情報
+let suppressClick = false;     // ドラッグ直後のclick誤発火防止
+
 /* ---------- helpers ---------- */
 function pad2(n) { return String(n).padStart(2, '0'); }
 function todayStr() {
@@ -27,16 +36,25 @@ function todayStr() {
 }
 function fmtTime(min) { return `${pad2(Math.floor(min / 60))}:${pad2(min % 60)}`; }
 function uid() { return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
 }
 function t(key) {
-  const dict = I18N[state.settings.lang] || I18N.ja;
-  return dict[key] ?? I18N.ja[key] ?? key;
+  const d = I18N[state.settings.lang] || I18N.ja;
+  return d[key] ?? I18N.ja[key] ?? key;
 }
 function dict() { return I18N[state.settings.lang] || I18N.ja; }
+
+/* 端末幅に応じたタイムテーブルの寸法 */
+function ttMetrics() {
+  const phone = window.matchMedia('(max-width: 700px)').matches;
+  return phone
+    ? { slotW: 44, labelW: 88, rowH: 56 }
+    : { slotW: 56, labelW: 136, rowH: 64 };
+}
 
 /* ---------- state ---------- */
 function defaultState() {
@@ -111,9 +129,13 @@ function renderDateBar() {
 /* ---------- timetable view ---------- */
 function renderTimetable() {
   const { openMin, closeMin } = state.settings;
-  const totalMin = closeMin - openMin;
-  const slots = Math.ceil(totalMin / SLOT_MIN);
-  const rowW = slots * SLOT_W;
+  const m = ttMetrics();
+  document.documentElement.style.setProperty('--slot-w', m.slotW + 'px');
+  document.documentElement.style.setProperty('--label-w', m.labelW + 'px');
+  document.documentElement.style.setProperty('--row-h', m.rowH + 'px');
+
+  const slots = Math.ceil((closeMin - openMin) / SLOT_MIN);
+  const rowW = slots * m.slotW;
 
   const wrap = document.getElementById('ttScroll');
   const grid = document.createElement('div');
@@ -131,8 +153,8 @@ function renderTimetable() {
   for (let min = openMin; min < closeMin; min += 60) {
     const lbl = document.createElement('div');
     lbl.className = 'tt-hour-label';
-    lbl.style.left = ((min - openMin) / SLOT_MIN) * SLOT_W + 'px';
-    lbl.style.width = (60 / SLOT_MIN) * SLOT_W + 'px';
+    lbl.style.left = ((min - openMin) / SLOT_MIN) * m.slotW + 'px';
+    lbl.style.width = (60 / SLOT_MIN) * m.slotW + 'px';
     lbl.textContent = fmtTime(min);
     timehead.appendChild(lbl);
   }
@@ -140,6 +162,7 @@ function renderTimetable() {
   grid.appendChild(head);
 
   const resList = dayReservations(currentDate);
+  const rows = [];
 
   state.tables.forEach((tb) => {
     const line = document.createElement('div');
@@ -162,26 +185,39 @@ function renderTimetable() {
         if (end <= openMin || start >= closeMin) return;
         const block = document.createElement('div');
         block.className = 'tt-block ' + r.status;
-        block.style.left = ((start - openMin) / SLOT_MIN) * SLOT_W + 1 + 'px';
-        block.style.width = ((end - start) / SLOT_MIN) * SLOT_W - 3 + 'px';
+        block.dataset.resId = r.id;
+        block.style.left = ((start - openMin) / SLOT_MIN) * m.slotW + 1 + 'px';
+        block.style.width = ((end - start) / SLOT_MIN) * m.slotW - 3 + 'px';
         const pax = (r.adults || 0) + (r.children || 0);
         block.innerHTML =
           `<div class="b-name">${esc(r.name)}</div>` +
           `<div class="b-info">${esc(dict().fmtPax(pax))} ${fmtTime(r.start)}-${fmtTime(r.start + r.duration)}</div>`;
-        block.addEventListener('click', (e) => { e.stopPropagation(); openResModal(r.id); });
+
+        // 右端: 滞在時間変更ハンドル
+        const rh = document.createElement('div');
+        rh.className = 'b-resize';
+        rh.addEventListener('pointerdown', (e) => onResizePointerDown(e, r.id, tb.id));
+        block.appendChild(rh);
+
+        // 長押し（PCはドラッグ）で移動、タップで編集
+        block.addEventListener('pointerdown', (e) => onBlockPointerDown(e, r.id, tb.id));
+        block.addEventListener('click', (e) => e.stopPropagation());
         row.appendChild(block);
       });
 
     // 空きマスをタップ → その時間・テーブルで新規予約
     row.addEventListener('click', (e) => {
+      if (suppressClick) { suppressClick = false; return; }
+      if (e.target.closest('.tt-block')) return;
       const rect = row.getBoundingClientRect();
       const x = e.clientX - rect.left;
-      const min = openMin + Math.floor(x / SLOT_W) * SLOT_MIN;
+      const min = openMin + Math.floor(x / m.slotW) * SLOT_MIN;
       openResModal(null, { start: min, tableId: tb.id });
     });
 
     line.appendChild(row);
     grid.appendChild(line);
+    rows.push({ tableId: tb.id, lineEl: line, rowEl: row });
   });
 
   // 現在時刻ライン
@@ -191,20 +227,202 @@ function renderTimetable() {
     if (nowMin >= openMin && nowMin <= closeMin) {
       const nl = document.createElement('div');
       nl.className = 'now-line';
-      nl.style.left = LABEL_W + ((nowMin - openMin) / SLOT_MIN) * SLOT_W + 'px';
+      nl.style.left = m.labelW + ((nowMin - openMin) / SLOT_MIN) * m.slotW + 'px';
       grid.appendChild(nl);
     }
   }
 
   wrap.replaceChildren(grid);
+  ttCtx = { grid, scroll: wrap, rows, openMin, closeMin, metrics: m };
   renderLegend();
 }
 
 function renderLegend() {
   const colors = { reserved: 'var(--reserved)', seated: 'var(--seated)', finished: 'var(--finished)', noshow: 'var(--noshow)', cancelled: 'var(--cancelled)' };
-  document.getElementById('legend').innerHTML = STATUSES.map((s) =>
-    `<span class="lg"><span class="sw" style="background:${colors[s]}"></span>${esc(statusLabel(s))}</span>`
-  ).join('');
+  document.getElementById('legend').innerHTML =
+    STATUSES.map((s) =>
+      `<span class="lg"><span class="sw" style="background:${colors[s]}"></span>${esc(statusLabel(s))}</span>`
+    ).join('') +
+    `<span class="hint">${esc(t('dragHint'))}</span>`;
+}
+
+/* ---------- drag & drop（配席移動・滞在時間変更） ---------- */
+function onBlockPointerDown(e, resId, tableId) {
+  if (drag || !ttCtx) return;
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  const r = state.reservations.find((x) => x.id === resId);
+  if (!r) return;
+  drag = {
+    mode: 'move', resId, r, fromTableId: tableId,
+    startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY,
+    pointerType: e.pointerType, started: false, longTimer: null,
+    newStart: r.start, newTableId: tableId, newDuration: r.duration,
+  };
+  // タッチ・ペンは長押しで移動開始（それまではスクロール優先）
+  if (e.pointerType !== 'mouse') {
+    drag.longTimer = setTimeout(() => { if (drag && !drag.started) startDrag(); }, LONG_PRESS_MS);
+  }
+}
+
+function onResizePointerDown(e, resId, tableId) {
+  if (drag || !ttCtx) return;
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  e.stopPropagation();
+  const r = state.reservations.find((x) => x.id === resId);
+  if (!r) return;
+  drag = {
+    mode: 'resize', resId, r, fromTableId: tableId,
+    startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY,
+    pointerType: e.pointerType, started: false, longTimer: null,
+    newStart: r.start, newTableId: tableId, newDuration: r.duration,
+  };
+  startDrag(); // ハンドルは即ドラッグ開始（touch-action:noneでスクロールと競合しない）
+}
+
+function startDrag() {
+  if (!drag || drag.started) return;
+  drag.started = true;
+  if (navigator.vibrate) navigator.vibrate(15);
+
+  const ghost = document.createElement('div');
+  ghost.className = 'tt-block tt-ghost ' + drag.r.status;
+  ttCtx.grid.appendChild(ghost);
+  drag.ghost = ghost;
+
+  document.querySelectorAll(`.tt-block[data-res-id="${drag.resId}"]`).forEach((b) => b.classList.add('drag-src'));
+
+  // つかんだ位置と予約開始時刻のズレ（分）を記録
+  const gr = ttCtx.grid.getBoundingClientRect();
+  const pointerMin = ttCtx.openMin + ((drag.lastX - gr.left - ttCtx.metrics.labelW) / ttCtx.metrics.slotW) * SLOT_MIN;
+  drag.grabOffset = pointerMin - drag.r.start;
+
+  updateDragFromPointer();
+}
+
+function onDragMove(e) {
+  if (!drag) return;
+  drag.lastX = e.clientX;
+  drag.lastY = e.clientY;
+
+  if (!drag.started) {
+    const dist = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY);
+    if (drag.pointerType === 'mouse') {
+      if (dist > 4) startDrag();
+    } else if (dist > 12) {
+      // 長押し前に動いた → スクロール操作として扱う
+      clearTimeout(drag.longTimer);
+      drag = null;
+    }
+    return;
+  }
+  updateDragFromPointer();
+  autoScroll(e);
+}
+
+function updateDragFromPointer() {
+  if (!drag || !drag.started || !ttCtx) return;
+  const m = ttCtx.metrics;
+  const gr = ttCtx.grid.getBoundingClientRect();
+  const x = drag.lastX - gr.left;
+  const y = drag.lastY - gr.top;
+
+  if (drag.mode === 'move') {
+    let startMin = ttCtx.openMin + ((x - m.labelW) / m.slotW) * SLOT_MIN - drag.grabOffset;
+    startMin = Math.round(startMin / SNAP_MIN) * SNAP_MIN;
+    drag.newStart = clamp(startMin, ttCtx.openMin, Math.max(ttCtx.openMin, ttCtx.closeMin - drag.r.duration));
+
+    let idx = ttCtx.rows.findIndex((row) => {
+      const top = row.lineEl.offsetTop;
+      return y >= top && y < top + row.lineEl.offsetHeight;
+    });
+    if (idx < 0) idx = y < ttCtx.rows[0].lineEl.offsetTop ? 0 : ttCtx.rows.length - 1;
+    drag.newTableId = ttCtx.rows[idx].tableId;
+    ttCtx.rows.forEach((row, i) => row.rowEl.classList.toggle('drop-target', i === idx));
+  } else {
+    let endMin = ttCtx.openMin + ((x - m.labelW) / m.slotW) * SLOT_MIN;
+    endMin = Math.round(endMin / SNAP_MIN) * SNAP_MIN;
+    endMin = clamp(endMin, drag.r.start + 30, ttCtx.closeMin);
+    drag.newDuration = endMin - drag.r.start;
+  }
+  updateGhost();
+}
+
+function updateGhost() {
+  const m = ttCtx.metrics;
+  const row = ttCtx.rows.find((rw) => rw.tableId === (drag.mode === 'move' ? drag.newTableId : drag.fromTableId));
+  if (!row) return;
+  const start = drag.mode === 'move' ? drag.newStart : drag.r.start;
+  const dur = drag.mode === 'move' ? drag.r.duration : drag.newDuration;
+  const end = Math.min(start + dur, ttCtx.closeMin);
+
+  const g = drag.ghost;
+  g.style.top = row.lineEl.offsetTop + 5 + 'px';
+  g.style.height = row.lineEl.offsetHeight - 11 + 'px';
+  g.style.bottom = 'auto';
+  g.style.left = m.labelW + ((Math.max(start, ttCtx.openMin) - ttCtx.openMin) / SLOT_MIN) * m.slotW + 1 + 'px';
+  g.style.width = ((end - Math.max(start, ttCtx.openMin)) / SLOT_MIN) * m.slotW - 3 + 'px';
+
+  const pax = (drag.r.adults || 0) + (drag.r.children || 0);
+  g.innerHTML =
+    `<div class="b-name">${esc(drag.r.name)}</div>` +
+    `<div class="b-info">${esc(dict().fmtPax(pax))} ${fmtTime(start)}-${fmtTime(start + dur)}</div>`;
+}
+
+function autoScroll(e) {
+  const sc = ttCtx.scroll;
+  const rect = sc.getBoundingClientRect();
+  const m = ttCtx.metrics;
+  if (e.clientX > rect.right - 48) sc.scrollLeft += 14;
+  else if (e.clientX < rect.left + m.labelW + 14) sc.scrollLeft -= 14;
+  if (e.clientY > rect.bottom - 48) sc.scrollTop += 12;
+  else if (e.clientY < rect.top + 52) sc.scrollTop -= 12;
+}
+
+function onDragUp() {
+  if (!drag) return;
+  clearTimeout(drag.longTimer);
+  const d = drag;
+  drag = null;
+
+  if (!d.started) {
+    // 動かさずに離した → タップ＝詳細を開く（リサイズハンドルは無視）
+    if (d.mode === 'move') openResModal(d.resId);
+    return;
+  }
+
+  suppressClick = true;
+  setTimeout(() => { suppressClick = false; }, 350);
+  cleanupDragVisuals(d);
+
+  const r = d.r;
+  if (d.mode === 'move') {
+    if (d.newStart === r.start && d.newTableId === d.fromTableId) { renderTimetable(); return; }
+    const newTableIds = [...new Set(r.tableIds.map((id) => (id === d.fromTableId ? d.newTableId : id)))];
+    const updated = { ...r, start: d.newStart, tableIds: newTableIds };
+    if (hasConflict(updated) && !confirm(t('conflictWarn'))) { renderTimetable(); return; }
+    Object.assign(r, updated);
+  } else {
+    if (d.newDuration === r.duration) { renderTimetable(); return; }
+    const updated = { ...r, duration: d.newDuration };
+    if (hasConflict(updated) && !confirm(t('conflictWarn'))) { renderTimetable(); return; }
+    r.duration = d.newDuration;
+  }
+  save();
+  renderAll();
+}
+
+function onDragCancel() {
+  if (!drag) return;
+  clearTimeout(drag.longTimer);
+  const d = drag;
+  drag = null;
+  if (d.started) { cleanupDragVisuals(d); renderTimetable(); }
+}
+
+function cleanupDragVisuals(d) {
+  d.ghost?.remove();
+  document.querySelectorAll('.tt-block.drag-src').forEach((b) => b.classList.remove('drag-src'));
+  document.querySelectorAll('.tt-row.drop-target').forEach((rw) => rw.classList.remove('drop-target'));
 }
 
 /* ---------- list view ---------- */
@@ -350,9 +568,8 @@ function openResModal(resId, prefill = {}) {
   document.getElementById('fDate').value = r ? r.date : currentDate;
 
   const { openMin, closeMin } = state.settings;
-  let start = r ? r.start : (prefill.start ?? Math.max(openMin, Math.min(closeMin - 15, defaultStart())));
-  start = Math.max(openMin, Math.min(closeMin - 15, start));
-  start = start - (start % 15);
+  let start = r ? r.start : (prefill.start ?? defaultStart());
+  start = clamp(start - (start % 15), openMin, closeMin - 15);
   document.getElementById('fStart').value = start;
   document.getElementById('fDur').value = r ? r.duration : 120;
 
@@ -504,7 +721,9 @@ function saveSettings() {
 /* ---------- view switching / render ---------- */
 function setView(v) {
   view = v;
-  document.querySelectorAll('#viewSwitch .vs-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
+  document.querySelectorAll('#viewSwitch .vs-btn, #bottomNav .bn-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.view === v);
+  });
   document.getElementById('view-timetable').classList.toggle('hidden', v !== 'timetable');
   document.getElementById('view-list').classList.toggle('hidden', v !== 'list');
   document.getElementById('view-customers').classList.toggle('hidden', v !== 'customers');
@@ -530,10 +749,12 @@ function shiftDate(days) {
 function init() {
   load();
 
-  document.getElementById('viewSwitch').addEventListener('click', (e) => {
-    const btn = e.target.closest('.vs-btn');
+  const onNavClick = (e) => {
+    const btn = e.target.closest('[data-view]');
     if (btn) setView(btn.dataset.view);
-  });
+  };
+  document.getElementById('viewSwitch').addEventListener('click', onNavClick);
+  document.getElementById('bottomNav').addEventListener('click', onNavClick);
 
   document.getElementById('langSwitch').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-lang]');
@@ -552,6 +773,8 @@ function init() {
 
   document.getElementById('btnNew').addEventListener('click', () => openResModal(null));
   document.getElementById('btnWalkIn').addEventListener('click', () => openResModal(null, { walkIn: true }));
+  document.getElementById('fabNew').addEventListener('click', () => openResModal(null));
+  document.getElementById('fabWalkIn').addEventListener('click', () => openResModal(null, { walkIn: true }));
 
   document.getElementById('btnResClose').addEventListener('click', closeResModal);
   document.getElementById('btnResCancel').addEventListener('click', closeResModal);
@@ -561,8 +784,7 @@ function init() {
   document.querySelectorAll('.step-btn').forEach((b) => {
     b.addEventListener('click', () => {
       const el = document.getElementById(b.dataset.step === 'adults' ? 'fAdults' : 'fChildren');
-      const min = b.dataset.step === 'adults' ? 0 : 0;
-      el.textContent = Math.max(min, Number(el.textContent) + Number(b.dataset.d));
+      el.textContent = Math.max(0, Number(el.textContent) + Number(b.dataset.d));
     });
   });
 
@@ -576,8 +798,24 @@ function init() {
     if (view === 'customers') renderCustomers();
   });
 
+  // ドラッグ用グローバルリスナー
+  window.addEventListener('pointermove', onDragMove);
+  window.addEventListener('pointerup', onDragUp);
+  window.addEventListener('pointercancel', onDragCancel);
+  // ドラッグ確定後はスクロールを止める（passive:false 必須）
+  document.addEventListener('touchmove', (e) => {
+    if (drag && drag.started) e.preventDefault();
+  }, { passive: false });
+
+  // 画面回転・リサイズで寸法を再計算
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (view === 'timetable') renderTimetable(); }, 150);
+  });
+
   // 現在時刻ラインを1分ごとに更新
-  setInterval(() => { if (view === 'timetable') renderTimetable(); }, 60000);
+  setInterval(() => { if (view === 'timetable' && !drag) renderTimetable(); }, 60000);
 
   renderAll();
 }
