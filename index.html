@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
   <!-- dinii風 細線SVGアイコン定義 -->
@@ -40,6 +40,11 @@
       <line x1="12" y1="5" x2="12" y2="19"/>
       <line x1="5" y1="12" x2="19" y2="12"/>
     </symbol>
+    <symbol id="ic-globe" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="2" y1="12" x2="22" y2="12"/>
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+    </symbol>
     <symbol id="ic-walkin" viewBox="0 0 24 24">
       <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
       <circle cx="8.5" cy="7" r="4"/>
@@ -54,6 +59,10 @@
     <button class="rail-btn" data-view="customers">
       <span class="rail-ic"><svg class="ic"><use href="#ic-users"/></svg></span>
       <span class="rail-label" data-i18n="customers"></span>
+    </button>
+    <button class="rail-btn" data-view="sites">
+      <span class="rail-ic"><svg class="ic"><use href="#ic-globe"/></svg></span>
+      <span class="rail-label" data-i18n="sites"></span>
     </button>
     <button class="rail-btn" id="railSettings">
       <span class="rail-ic"><svg class="ic"><use href="#ic-gear"/></svg></span>
@@ -105,6 +114,16 @@
         </div>
         <div class="cust-wrap" id="custWrap"></div>
       </section>
+
+      <section id="view-sites" class="view hidden">
+        <div class="sites-wrap">
+          <div class="site-cards" id="siteCards"></div>
+          <button class="btn ghost" id="btnAddSite"><svg class="ic"><use href="#ic-plus"/></svg> <span data-i18n="addSite"></span></button>
+          <h3 class="inv-heading" data-i18n="invHeading"></h3>
+          <p class="inv-note" data-i18n="invNote"></p>
+          <div class="inv-scroll" id="invGrid"></div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -113,6 +132,7 @@
     <button class="bn-btn active" data-view="timetable"><span class="bn-ic"><svg class="ic"><use href="#ic-calendar"/></svg></span><span data-i18n="timetable"></span></button>
     <button class="bn-btn" data-view="list"><span class="bn-ic"><svg class="ic"><use href="#ic-list"/></svg></span><span data-i18n="list"></span></button>
     <button class="bn-btn" data-view="customers"><span class="bn-ic"><svg class="ic"><use href="#ic-users"/></svg></span><span data-i18n="customers"></span></button>
+    <button class="bn-btn" data-view="sites"><span class="bn-ic"><svg class="ic"><use href="#ic-globe"/></svg></span><span data-i18n="sites"></span></button>
   </nav>
   <div class="fabs">
     <button id="fabWalkIn" class="fab secondary" title="walk-in"><svg class="ic"><use href="#ic-walkin"/></svg></button>
@@ -194,10 +214,14 @@
 
           <h3 class="sec" data-i18n="secOther"></h3>
           <div class="field">
+            <label data-i18n="channel"></label>
+            <select id="fChannel"></select>
+          </div>
+          <div class="field">
             <label data-i18n="course"></label>
             <input type="text" id="fCourse">
           </div>
-          <div class="field span2">
+          <div class="field span3">
             <label data-i18n="memo"></label>
             <textarea id="fMemo" rows="2"></textarea>
           </div>
@@ -246,7 +270,39 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=8"></script>
-  <script src="app.js?v=8"></script>
+  <!-- Site modal（予約サイトの追加・編集） -->
+  <div class="modal-backdrop hidden" id="siteModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="siteModalTitle"></h2>
+        <button class="icon-btn" id="btnSiteClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="field span2">
+            <label data-i18n="siteName"></label>
+            <input type="text" id="sName">
+          </div>
+          <div class="field">
+            <label data-i18n="colorLabel"></label>
+            <div class="color-swatches" id="sColors"></div>
+          </div>
+          <div class="field span3">
+            <label data-i18n="linkedTables"></label>
+            <div class="table-chips" id="sTables"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn danger hidden" id="btnSiteDelete" data-i18n="delete"></button>
+        <span class="spacer"></span>
+        <button class="btn ghost" id="btnSiteCancel" data-i18n="cancelBtn"></button>
+        <button class="btn primary" id="btnSiteSave" data-i18n="save"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="i18n.js?v=9"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

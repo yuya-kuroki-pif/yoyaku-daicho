@@ -79,13 +79,26 @@ function defaultState() {
   return {
     tables,
     reservations,
+    sites: defaultSites(),
     settings: { lang: 'ja', openMin: 11 * 60, closeMin: 23 * 60 },
   };
+}
+function defaultSites() {
+  return [
+    { id: 's1', name: '食べログ', color: '#f59e0b', enabled: true, tableIds: ['t1', 't2', 't3'] },
+    { id: 's2', name: 'ホットペッパー', color: '#ef4444', enabled: true, tableIds: ['t2', 't3', 't4'] },
+    { id: 's3', name: 'ぐるなび', color: '#8b5cf6', enabled: false, tableIds: ['t5', 't6'] },
+    { id: 's4', name: '自社サイト', color: '#0ea5e9', enabled: true, tableIds: ['t1', 't4', 't7'] },
+  ];
 }
 function load() {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) { state = JSON.parse(raw); return; }
+    if (raw) {
+      state = JSON.parse(raw);
+      if (!state.sites) { state.sites = defaultSites(); save(); } // 旧データの移行
+      return;
+    }
   } catch (e) { /* 壊れたデータは初期化 */ }
   state = defaultState();
   save();
@@ -141,7 +154,8 @@ function buildVisitMap() {
   });
   return map;
 }
-/* ブロック/カード内の名前行（名前・人数・来店回数チップ・コースアイコン） */
+/* ブロック/カード内の名前行（経路色・名前・人数・来店回数チップ・コースアイコン） */
+function siteById(id) { return (state.sites || []).find((s) => s.id === id); }
 function blockNameHtml(r, visitMap) {
   const pax = (r.adults || 0) + (r.children || 0);
   const visits = visitMap.get(custKey(r)) || 0;
@@ -149,7 +163,9 @@ function blockNameHtml(r, visitMap) {
     ? `<span class="chip-visit">${esc(dict().fmtVisits(visits))}</span>`
     : `<span class="chip-visit">${esc(t('firstVisit'))}</span>`;
   const courseIco = r.course ? '<span class="b-ico">🍴</span>' : '';
-  return `${esc(r.name)} <span>${esc(dict().fmtPax(pax))}</span> ${chip}${courseIco}`;
+  const site = siteById(r.channel);
+  const dot = site ? `<span class="ch-dot" style="background:${esc(site.color)}"></span>` : '';
+  return `${dot}${esc(r.name)} <span>${esc(dict().fmtPax(pax))}</span> ${chip}${courseIco}`;
 }
 
 /* ---------- timetable view ---------- */
@@ -525,7 +541,7 @@ function renderList() {
       `<div class="rc-time">${fmtTime(r.start)}<small>${fmtTime(r.start + r.duration)}</small></div>` +
       `<div class="rc-main">` +
         `<div class="rc-name">${blockNameHtml(r, visitMap)}</div>` +
-        `<div class="rc-sub">${esc(tableNames(r.tableIds))}${r.phone ? '　📞 ' + esc(r.phone) : ''}${r.course ? '　🍴 ' + esc(r.course) : ''}${r.memo ? '　📝 ' + esc(r.memo) : ''}</div>` +
+        `<div class="rc-sub">${esc(tableNames(r.tableIds))}${(() => { const s = siteById(r.channel); return s ? '　🌐 ' + esc(s.name) : ''; })()}${r.phone ? '　📞 ' + esc(r.phone) : ''}${r.course ? '　🍴 ' + esc(r.course) : ''}${r.memo ? '　📝 ' + esc(r.memo) : ''}</div>` +
       `</div>` +
       `<div class="rc-actions">${quick}<span class="status-chip ${r.status}">${esc(statusLabel(r.status))}</span></div>`;
     card.addEventListener('click', () => openResModal(r.id));
@@ -672,6 +688,155 @@ function createWalkIn(start, tableId, pax) {
   renderAll();
 }
 
+/* ---------- 予約サイト設定・在庫連携 ---------- */
+const SITE_COLORS = ['#f59e0b', '#ef4444', '#8b5cf6', '#0ea5e9', '#16a34a', '#ec4899'];
+let editingSiteId = null;
+let siteModalTables = new Set();
+let siteModalColor = SITE_COLORS[0];
+
+function renderSites() {
+  const wrap = document.getElementById('siteCards');
+  wrap.innerHTML = '';
+  if (!state.sites.length) {
+    wrap.innerHTML = `<div class="empty-note">${esc(t('noSites'))}</div>`;
+  }
+  state.sites.forEach((s) => {
+    const card = document.createElement('div');
+    card.className = 'site-card';
+    card.innerHTML =
+      `<span class="site-color" style="background:${esc(s.color)}"></span>` +
+      `<div class="site-main">` +
+        `<div class="site-name">${esc(s.name)}</div>` +
+        `<div class="site-sub">${esc(t('linkedTables'))}: ${esc(tableNames(s.tableIds))}</div>` +
+      `</div>` +
+      `<button class="pill ${s.enabled ? 'on' : 'off'}">${esc(s.enabled ? t('acceptOn') : t('acceptOff'))}</button>`;
+    card.querySelector('.pill').addEventListener('click', (e) => {
+      e.stopPropagation();
+      s.enabled = !s.enabled;
+      save();
+      renderSites();
+    });
+    card.addEventListener('click', () => openSiteModal(s.id));
+    wrap.appendChild(card);
+  });
+  renderInventory();
+}
+
+/* 台帳の予約状況からサイトごとの空席在庫を計算して表示 */
+function renderInventory() {
+  const wrap = document.getElementById('invGrid');
+  const { openMin, closeMin } = state.settings;
+  const DUR = 120; // 滞在想定（分）
+  const lastStart = closeMin - DUR;
+  const sites = state.sites.filter((s) => s.enabled);
+  if (!sites.length || lastStart < openMin) {
+    wrap.innerHTML = `<div class="empty-note">${esc(t('noSites'))}</div>`;
+    return;
+  }
+  const slots = [];
+  for (let m2 = openMin; m2 <= lastStart; m2 += 30) slots.push(m2);
+
+  const actives = dayReservations(currentDate).filter((r) => r.status !== 'cancelled' && r.status !== 'noshow');
+  const busy = (tableId, start) =>
+    actives.some((r) => (r.tableIds || []).includes(tableId) && r.start < start + DUR && start < r.start + r.duration);
+
+  let html = '<table class="inv-table"><thead><tr><th></th>' +
+    slots.map((s2) => `<th>${fmtTime(s2)}</th>`).join('') +
+    '</tr></thead><tbody>';
+  sites.forEach((s) => {
+    html += `<tr><th><span class="ch-dot" style="background:${esc(s.color)}"></span>${esc(s.name)}</th>`;
+    slots.forEach((m2) => {
+      const n = s.tableIds.filter((id) => tableById(id) && !busy(id, m2)).length;
+      const cls = n === 0 ? 'full' : n === 1 ? 'low' : 'ok';
+      html += `<td class="inv-cell ${cls}" data-site="${esc(s.id)}" data-start="${m2}" title="${n === 0 ? esc(t('full')) : ''}">${n === 0 ? '×' : n}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+
+  // 空きマスタップ → そのサイト経由の予約を登録
+  wrap.querySelectorAll('.inv-cell.ok, .inv-cell.low').forEach((td) => {
+    td.addEventListener('click', () => {
+      const site = siteById(td.dataset.site);
+      const start = Number(td.dataset.start);
+      if (!site) return;
+      const freeTable = site.tableIds.find((id) => tableById(id) && !busy(id, start));
+      openResModal(null, { start, tableId: freeTable, channel: site.id });
+    });
+  });
+}
+
+function openSiteModal(siteId) {
+  editingSiteId = siteId || null;
+  const s = siteId ? siteById(siteId) : null;
+  document.getElementById('siteModalTitle').textContent = s ? t('editSite') : t('addSite');
+  document.getElementById('sName').value = s ? s.name : '';
+  siteModalColor = s ? s.color : SITE_COLORS[state.sites.length % SITE_COLORS.length];
+  siteModalTables = new Set(s ? s.tableIds : []);
+  renderSiteColors();
+  renderSiteTables();
+  document.getElementById('btnSiteDelete').classList.toggle('hidden', !s);
+  document.getElementById('siteModal').classList.remove('hidden');
+}
+
+function renderSiteColors() {
+  const wrap = document.getElementById('sColors');
+  wrap.innerHTML = '';
+  SITE_COLORS.forEach((c) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.style.background = c;
+    b.className = c === siteModalColor ? 'active' : '';
+    b.addEventListener('click', () => { siteModalColor = c; renderSiteColors(); });
+    wrap.appendChild(b);
+  });
+}
+
+function renderSiteTables() {
+  const wrap = document.getElementById('sTables');
+  wrap.innerHTML = '';
+  state.tables.forEach((tb) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip' + (siteModalTables.has(tb.id) ? ' active' : '');
+    chip.textContent = `${tb.name} (${tb.seats})`;
+    chip.addEventListener('click', () => {
+      if (siteModalTables.has(tb.id)) siteModalTables.delete(tb.id); else siteModalTables.add(tb.id);
+      renderSiteTables();
+    });
+    wrap.appendChild(chip);
+  });
+}
+
+function closeSiteModal() {
+  document.getElementById('siteModal').classList.add('hidden');
+  editingSiteId = null;
+}
+
+function saveSite() {
+  const name = document.getElementById('sName').value.trim();
+  if (!name) { alert(t('siteName')); return; }
+  if (editingSiteId) {
+    const s = siteById(editingSiteId);
+    if (s) { s.name = name; s.color = siteModalColor; s.tableIds = [...siteModalTables]; }
+  } else {
+    state.sites.push({ id: uid(), name, color: siteModalColor, enabled: true, tableIds: [...siteModalTables] });
+  }
+  save();
+  closeSiteModal();
+  renderSites();
+}
+
+function deleteSite() {
+  if (!editingSiteId) return;
+  if (!confirm(t('deleteSiteConfirm'))) return;
+  state.sites = state.sites.filter((s) => s.id !== editingSiteId);
+  save();
+  closeSiteModal();
+  renderSites();
+}
+
 /* ---------- reservation modal ---------- */
 function fillTimeSelects() {
   const { openMin, closeMin } = state.settings;
@@ -746,6 +911,12 @@ function openResModal(resId, prefill = {}) {
   document.getElementById('fCourse').value = r ? (r.course || '') : '';
   document.getElementById('fMemo').value = r ? (r.memo || '') : '';
 
+  // 予約経路（店頭・電話＋登録済みサイト）
+  const chSel = document.getElementById('fChannel');
+  chSel.innerHTML = `<option value="">${esc(t('channelNone'))}</option>` +
+    state.sites.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  chSel.value = r ? (r.channel || '') : (prefill.channel || '');
+
   modalTables = new Set(r ? r.tableIds : (prefill.tableId ? [prefill.tableId] : []));
   renderModalTables();
 
@@ -799,6 +970,7 @@ function saveReservation() {
     tableIds: [...modalTables],
     course: document.getElementById('fCourse').value.trim(),
     memo: document.getElementById('fMemo').value.trim(),
+    channel: document.getElementById('fChannel').value,
     status: modalStatus,
     walkIn: modalWalkIn,
   };
@@ -889,11 +1061,10 @@ function setView(v) {
   document.querySelectorAll('.rail-btn[data-view], #bottomNav .bn-btn, #viewSwitch .vs-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.view === v);
   });
-  // 顧客台帳ではタイムライン/予約一覧の切替を隠す（dinii同様、席管理内の切替のため）
-  document.getElementById('viewSwitch').classList.toggle('hidden', v === 'customers');
   document.getElementById('view-timetable').classList.toggle('hidden', v !== 'timetable');
   document.getElementById('view-list').classList.toggle('hidden', v !== 'list');
   document.getElementById('view-customers').classList.toggle('hidden', v !== 'customers');
+  document.getElementById('view-sites').classList.toggle('hidden', v !== 'sites');
   renderAll();
 }
 
@@ -903,6 +1074,7 @@ function renderAll() {
   renderDateBar();
   if (view === 'timetable') renderTimetable();
   else if (view === 'list') renderList();
+  else if (view === 'sites') renderSites();
   else renderCustomers();
 }
 
@@ -969,6 +1141,13 @@ function init() {
       el.textContent = Math.max(0, Number(el.textContent) + Number(b.dataset.d));
     });
   });
+
+  // 予約サイト設定
+  document.getElementById('btnAddSite').addEventListener('click', () => openSiteModal(null));
+  document.getElementById('btnSiteClose').addEventListener('click', closeSiteModal);
+  document.getElementById('btnSiteCancel').addEventListener('click', closeSiteModal);
+  document.getElementById('btnSiteSave').addEventListener('click', saveSite);
+  document.getElementById('btnSiteDelete').addEventListener('click', deleteSite);
 
   document.getElementById('btnSettings').addEventListener('click', openSettingsModal);
   document.getElementById('btnSetClose').addEventListener('click', () => document.getElementById('settingsModal').classList.add('hidden'));
