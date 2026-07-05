@@ -85,18 +85,26 @@ function defaultState() {
 }
 function defaultSites() {
   return [
+    { id: 's4', name: '自社サイト', color: '#0ea5e9', enabled: true, own: true, tableIds: ['t1', 't4', 't7'] },
     { id: 's1', name: '食べログ', color: '#f59e0b', enabled: true, tableIds: ['t1', 't2', 't3'] },
     { id: 's2', name: 'ホットペッパー', color: '#ef4444', enabled: true, tableIds: ['t2', 't3', 't4'] },
     { id: 's3', name: 'ぐるなび', color: '#8b5cf6', enabled: false, tableIds: ['t5', 't6'] },
-    { id: 's4', name: '自社サイト', color: '#0ea5e9', enabled: true, tableIds: ['t1', 't4', 't7'] },
   ];
 }
+function ownSite() { return (state.sites || []).find((s) => s.own); }
 function load() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {
       state = JSON.parse(raw);
-      if (!state.sites) { state.sites = defaultSites(); save(); } // 旧データの移行
+      // 旧データの移行
+      if (!state.sites) { state.sites = defaultSites(); save(); }
+      if (!state.sites.some((s) => s.own)) {
+        const cand = state.sites.find((s) => s.name === '自社サイト');
+        if (cand) cand.own = true;
+        else state.sites.unshift({ id: uid(), name: '自社サイト', color: '#0ea5e9', enabled: true, own: true, tableIds: state.tables.slice(0, 3).map((tb) => tb.id) });
+        save();
+      }
       return;
     }
   } catch (e) { /* 壊れたデータは初期化 */ }
@@ -694,13 +702,20 @@ let editingSiteId = null;
 let siteModalTables = new Set();
 let siteModalColor = SITE_COLORS[0];
 
+function bookingUrl() {
+  if (location.protocol === 'file:') return location.href.replace(/index\.html.*$/, '') + 'booking.html';
+  return `${location.protocol}//${location.host}/booking.html`;
+}
+
 function renderSites() {
+  document.getElementById('ownUrl').textContent = bookingUrl();
   const wrap = document.getElementById('siteCards');
   wrap.innerHTML = '';
   if (!state.sites.length) {
     wrap.innerHTML = `<div class="empty-note">${esc(t('noSites'))}</div>`;
   }
-  state.sites.forEach((s) => {
+  // 自社サイトを先頭に表示
+  [...state.sites].sort((a, b) => (b.own ? 1 : 0) - (a.own ? 1 : 0)).forEach((s) => {
     const card = document.createElement('div');
     card.className = 'site-card';
     card.innerHTML =
@@ -728,7 +743,7 @@ function renderInventory() {
   const { openMin, closeMin } = state.settings;
   const DUR = 120; // 滞在想定（分）
   const lastStart = closeMin - DUR;
-  const sites = state.sites.filter((s) => s.enabled);
+  const sites = [...state.sites].sort((a, b) => (b.own ? 1 : 0) - (a.own ? 1 : 0)).filter((s) => s.enabled);
   if (!sites.length || lastStart < openMin) {
     wrap.innerHTML = `<div class="empty-note">${esc(t('noSites'))}</div>`;
     return;
@@ -776,7 +791,8 @@ function openSiteModal(siteId) {
   siteModalTables = new Set(s ? s.tableIds : []);
   renderSiteColors();
   renderSiteTables();
-  document.getElementById('btnSiteDelete').classList.toggle('hidden', !s);
+  // 自社サイトは削除不可（URL発行元のため）
+  document.getElementById('btnSiteDelete').classList.toggle('hidden', !s || !!s.own);
   document.getElementById('siteModal').classList.remove('hidden');
 }
 
@@ -1143,6 +1159,25 @@ function init() {
   });
 
   // 予約サイト設定
+  document.getElementById('btnSitesPhone').addEventListener('click', () => setView('sites'));
+  document.getElementById('btnCopyUrl').addEventListener('click', async () => {
+    const url = bookingUrl();
+    try {
+      if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(url);
+      else {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      const btn = document.getElementById('btnCopyUrl');
+      btn.textContent = t('copied');
+      setTimeout(() => { btn.textContent = t('copyUrl'); }, 1600);
+    } catch (e) { prompt('URL', url); }
+  });
+  document.getElementById('btnOpenSite').addEventListener('click', () => window.open(bookingUrl(), '_blank'));
   document.getElementById('btnAddSite').addEventListener('click', () => openSiteModal(null));
   document.getElementById('btnSiteClose').addEventListener('click', closeSiteModal);
   document.getElementById('btnSiteCancel').addEventListener('click', closeSiteModal);
@@ -1157,6 +1192,11 @@ function init() {
 
   document.getElementById('custSearch').addEventListener('input', () => {
     if (view === 'customers') renderCustomers();
+  });
+
+  // 別タブ（自社予約サイト等）での予約を即時反映
+  window.addEventListener('storage', (e) => {
+    if (e.key === LS_KEY) { load(); renderAll(); }
   });
 
   // ドラッグ用グローバルリスナー
