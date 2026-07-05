@@ -67,7 +67,7 @@ const I18N = {
     nameRequired: 'お名前を入力してください',
     walkInName: 'ウォークイン',
 
-    dragHint: '💡 予約は長押しして移動／右端をドラッグで滞在時間を変更',
+    dragHint: '💡 予約は長押しで移動・右端で時間変更／空きマスは長押ししてなぞると時間×複数席を選択',
     resTab: '予約',
     detailInput: '詳細を入力…',
 
@@ -170,7 +170,7 @@ const I18N = {
     nameRequired: 'Vui lòng nhập tên khách',
     walkInName: 'Khách vãng lai',
 
-    dragHint: '💡 Giữ khối đặt bàn để di chuyển / kéo mép phải để đổi thời gian ở lại',
+    dragHint: '💡 Giữ khối để di chuyển, kéo mép phải đổi giờ / Giữ ô trống rồi kéo để chọn khung giờ × nhiều bàn',
     resTab: 'Đặt bàn',
     detailInput: 'Nhập chi tiết…',
 

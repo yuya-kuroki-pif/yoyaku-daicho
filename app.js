@@ -265,15 +265,16 @@ function renderTimetable() {
     return block;
   };
 
-  // 空きマスタップ → トレタ風ポップオーバー（人数選択／ウォークイン）
+  // 空きマスタップ → トレタ風ポップオーバー（長押しドラッグで範囲選択はonRowPointerDown側）
   const attachRowTap = (row, tableId) => {
+    row.addEventListener('pointerdown', (e) => onRowPointerDown(e, tableId));
     row.addEventListener('click', (e) => {
       if (suppressClick) { suppressClick = false; return; }
       if (e.target.closest('.tt-block')) return;
       const rect = row.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const min = openMin + Math.floor((x / m.slotW) * SLOT_MIN / 15) * 15;
-      openCellPopover(e.clientX, e.clientY, min, tableId, row);
+      openCellPopover(e.clientX, e.clientY, min, tableId ? [tableId] : [], 120);
     });
   };
 
@@ -315,7 +316,7 @@ function renderTimetable() {
     // テーブル名をタップ → そのテーブルでポップオーバー
     label.addEventListener('click', (e) => {
       if (suppressClick) { suppressClick = false; return; }
-      openCellPopover(e.clientX, e.clientY, defaultStart(), tb.id, row);
+      openCellPopover(e.clientX, e.clientY, defaultStart(), [tb.id], 120);
     });
 
     resList
@@ -643,24 +644,21 @@ function renderCustomers() {
     `</tbody></table>`;
 }
 
-/* ---------- 空きマスタップのポップオーバー（トレタ風の予約/ウォークイン入力）
- * 横: ±30分ボタンで時間枠を伸縮 / 縦: テーブルチップで2席以上を選択可能 ---------- */
-function openCellPopover(clientX, clientY, start, tableId, rowEl) {
+/* ---------- 空きマスタップ/ドラッグのポップオーバー（トレタ風の予約/ウォークイン入力）
+ * タップ: 1席・既定2時間 / 長押し（PCはドラッグ）で枠をなぞる: 横=時間枠・縦=複数席を選択 ---------- */
+function openCellPopover(clientX, clientY, start, tableIds, duration) {
   closeCellPopover();
   const { openMin, closeMin } = state.settings;
   start = clamp(start - (start % 15), openMin, closeMin - 15);
   cellPick = {
     start,
-    duration: Math.min(120, closeMin - start),
-    tables: new Set(tableId ? [tableId] : []),
+    duration: clamp(duration || 120, 30, closeMin - start),
+    tables: new Set(tableIds || []),
     mode: 'res',
     selectEls: [],
   };
 
   setCpMode('res');
-
-  document.getElementById('cpMinus').textContent = `−30${t('minutesUnit')}`;
-  document.getElementById('cpPlus').textContent = `＋30${t('minutesUnit')}`;
 
   const paxWrap = document.getElementById('cpPax');
   paxWrap.innerHTML = '';
@@ -684,25 +682,10 @@ function openCellPopover(clientX, clientY, start, tableId, rowEl) {
 /* 選択中の時間枠・テーブルの表示とタイムライン上のハイライトを更新 */
 function renderCpSelection() {
   if (!cellPick) return;
-  const { openMin, closeMin } = state.settings;
-  cellPick.duration = clamp(cellPick.duration, 30, closeMin - cellPick.start);
-  document.getElementById('cpRange').textContent =
-    `${fmtTime(cellPick.start)}〜${fmtTime(cellPick.start + cellPick.duration)}`;
-
-  // テーブルチップ（縦方向の複数選択）
-  const wrap = document.getElementById('cpTables');
-  wrap.innerHTML = '';
-  state.tables.forEach((tb) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = cellPick.tables.has(tb.id) ? 'active' : '';
-    b.textContent = tb.name;
-    b.addEventListener('click', () => {
-      if (cellPick.tables.has(tb.id)) cellPick.tables.delete(tb.id); else cellPick.tables.add(tb.id);
-      renderCpSelection();
-    });
-    wrap.appendChild(b);
-  });
+  const { openMin } = state.settings;
+  const names = [...cellPick.tables].map((id) => tableById(id)?.name).filter(Boolean);
+  document.getElementById('cpInfo').textContent =
+    `${names.length ? names.join(', ') : t('unassigned')}　${fmtTime(cellPick.start)}〜${fmtTime(cellPick.start + cellPick.duration)}`;
 
   // 選択ハイライト（選択中の全テーブル行に青帯）
   cellPick.selectEls.forEach((el) => el.remove());
@@ -723,6 +706,128 @@ function renderCpSelection() {
 
   // ブロックは1席以上選択時のみ
   document.getElementById('cpBlock').classList.toggle('hidden', cellPick.tables.size === 0);
+}
+
+/* ---------- 枠をなぞって範囲選択（横=時間・縦=複数席） ---------- */
+let selDrag = null;
+
+function timeAtClientX(clientX) {
+  const m = ttCtx.metrics;
+  const gr = ttCtx.grid.getBoundingClientRect();
+  return ttCtx.openMin + ((clientX - gr.left - m.labelW) / m.slotW) * SLOT_MIN;
+}
+function rowIdxAtClientY(clientY) {
+  const gr = ttCtx.grid.getBoundingClientRect();
+  const y = clientY - gr.top;
+  let idx = ttCtx.rows.findIndex((row) => {
+    const top = row.lineEl.offsetTop;
+    return y >= top && y < top + row.lineEl.offsetHeight;
+  });
+  if (idx < 0) idx = y < ttCtx.rows[0].lineEl.offsetTop ? 0 : ttCtx.rows.length - 1;
+  return idx;
+}
+
+function onRowPointerDown(e, tableId) {
+  if (drag || selDrag || !ttCtx) return;
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  if (e.target.closest('.tt-block')) return;
+  if (!tableId) return; // 未配席行はタップのみ
+  selDrag = {
+    tableId,
+    startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY,
+    pointerType: e.pointerType, started: false, moved: false, longTimer: null, els: [],
+    selStart: 0, selDur: 30, minIdx: 0, maxIdx: 0,
+  };
+  if (e.pointerType !== 'mouse') {
+    selDrag.longTimer = setTimeout(() => { if (selDrag && !selDrag.started) startSelDrag(); }, 350);
+  }
+}
+
+function startSelDrag() {
+  if (!selDrag || !ttCtx) return;
+  selDrag.started = true;
+  if (navigator.vibrate) navigator.vibrate(15);
+  closeCellPopover();
+  const totalCells = Math.ceil((ttCtx.closeMin - ttCtx.openMin) / 30);
+  selDrag.anchorCell = clamp(Math.floor((timeAtClientX(selDrag.startX) - ttCtx.openMin) / 30), 0, totalCells - 1);
+  selDrag.anchorIdx = Math.max(1, ttCtx.rows.findIndex((rw) => rw.tableId === selDrag.tableId));
+  updateSelDrag();
+}
+
+function updateSelDrag() {
+  const totalCells = Math.ceil((ttCtx.closeMin - ttCtx.openMin) / 30);
+  const curCell = clamp(Math.floor((timeAtClientX(selDrag.lastX) - ttCtx.openMin) / 30), 0, totalCells - 1);
+  const curIdx = clamp(rowIdxAtClientY(selDrag.lastY), 1, ttCtx.rows.length - 1);
+  if (curCell !== selDrag.anchorCell || curIdx !== selDrag.anchorIdx) selDrag.moved = true;
+  const startCell = Math.min(selDrag.anchorCell, curCell);
+  const endCell = Math.max(selDrag.anchorCell, curCell);
+  selDrag.selStart = ttCtx.openMin + startCell * 30;
+  selDrag.selDur = (endCell - startCell + 1) * 30;
+  selDrag.minIdx = Math.min(selDrag.anchorIdx, curIdx);
+  selDrag.maxIdx = Math.max(selDrag.anchorIdx, curIdx);
+
+  // 選択バンドを再描画
+  selDrag.els.forEach((el) => el.remove());
+  selDrag.els = [];
+  const m = ttCtx.metrics;
+  for (let i = selDrag.minIdx; i <= selDrag.maxIdx; i++) {
+    const row = ttCtx.rows[i];
+    if (!row || row.tableId == null) continue;
+    const sel = document.createElement('div');
+    sel.className = 'tt-select';
+    sel.style.left = ((selDrag.selStart - ttCtx.openMin) / SLOT_MIN) * m.slotW + 1 + 'px';
+    sel.style.width = (selDrag.selDur / SLOT_MIN) * m.slotW - 3 + 'px';
+    row.rowEl.appendChild(sel);
+    selDrag.els.push(sel);
+  }
+}
+
+function onSelMove(e) {
+  if (!selDrag) return;
+  selDrag.lastX = e.clientX;
+  selDrag.lastY = e.clientY;
+  if (!selDrag.started) {
+    const dist = Math.hypot(e.clientX - selDrag.startX, e.clientY - selDrag.startY);
+    if (selDrag.pointerType === 'mouse') {
+      if (dist > 4) startSelDrag();
+    } else if (dist > 12) {
+      // 長押し前に動いた → スクロール操作
+      clearTimeout(selDrag.longTimer);
+      selDrag = null;
+    }
+    return;
+  }
+  updateSelDrag();
+  autoScroll(e);
+}
+
+function onSelUp(e) {
+  if (!selDrag) return;
+  clearTimeout(selDrag.longTimer);
+  const d = selDrag;
+  selDrag = null;
+  if (!d.started) return; // 通常タップ → rowのclickで処理
+  d.els.forEach((el) => el.remove());
+  suppressClick = true;
+  setTimeout(() => { suppressClick = false; }, 350);
+  // なぞらず離した長押しは通常タップ扱い（1席・既定2時間）
+  if (!d.moved) {
+    openCellPopover(e.clientX, e.clientY, d.selStart, [d.tableId], 120);
+    return;
+  }
+  const tables = [];
+  for (let i = d.minIdx; i <= d.maxIdx; i++) {
+    const row = ttCtx.rows[i];
+    if (row && row.tableId != null) tables.push(row.tableId);
+  }
+  openCellPopover(e.clientX, e.clientY, d.selStart, tables, d.selDur);
+}
+
+function onSelCancel() {
+  if (!selDrag) return;
+  clearTimeout(selDrag.longTimer);
+  selDrag.els.forEach((el) => el.remove());
+  selDrag = null;
 }
 
 function setCpMode(mode) {
@@ -1280,17 +1385,6 @@ function init() {
     closeCellPopover();
     createBlock(start, ids, duration);
   });
-  // 時間枠の伸縮（±30分）
-  document.getElementById('cpMinus').addEventListener('click', () => {
-    if (!cellPick) return;
-    cellPick.duration -= 30;
-    renderCpSelection();
-  });
-  document.getElementById('cpPlus').addEventListener('click', () => {
-    if (!cellPick) return;
-    cellPick.duration += 30;
-    renderCpSelection();
-  });
   // ポップオーバーの外側をタップで閉じる
   document.addEventListener('pointerdown', (e) => {
     if (cellPick && !e.target.closest('#cellPopover')) closeCellPopover();
@@ -1331,13 +1425,16 @@ function init() {
     if (e.key === LS_KEY) { load(); renderAll(); }
   });
 
-  // ドラッグ用グローバルリスナー
+  // ドラッグ用グローバルリスナー（予約ブロック移動＋範囲選択）
   window.addEventListener('pointermove', onDragMove);
   window.addEventListener('pointerup', onDragUp);
   window.addEventListener('pointercancel', onDragCancel);
+  window.addEventListener('pointermove', onSelMove);
+  window.addEventListener('pointerup', onSelUp);
+  window.addEventListener('pointercancel', onSelCancel);
   // ドラッグ確定後はスクロールを止める（passive:false 必須）
   document.addEventListener('touchmove', (e) => {
-    if (drag && drag.started) e.preventDefault();
+    if ((drag && drag.started) || (selDrag && selDrag.started)) e.preventDefault();
   }, { passive: false });
 
   // 画面回転・リサイズで寸法を再計算
