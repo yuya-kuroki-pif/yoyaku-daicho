@@ -7,20 +7,65 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
-  <!-- 左サイドバー（タブレット） -->
-  <aside class="rail">
+  <!-- dinii風 細線SVGアイコン定義 -->
+  <svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="ic-calendar" viewBox="0 0 24 24">
+      <rect x="3" y="4" width="18" height="17" rx="2"/>
+      <line x1="16" y1="2" x2="16" y2="6"/>
+      <line x1="8" y1="2" x2="8" y2="6"/>
+      <line x1="3" y1="10" x2="21" y2="10"/>
+    </symbol>
+    <symbol id="ic-list" viewBox="0 0 24 24">
+      <line x1="8" y1="6" x2="21" y2="6"/>
+      <line x1="8" y1="12" x2="21" y2="12"/>
+      <line x1="8" y1="18" x2="21" y2="18"/>
+      <line x1="3.5" y1="6" x2="3.51" y2="6"/>
+      <line x1="3.5" y1="12" x2="3.51" y2="12"/>
+      <line x1="3.5" y1="18" x2="3.51" y2="18"/>
+    </symbol>
+    <symbol id="ic-users" viewBox="0 0 24 24">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+      <circle cx="9" cy="7" r="4"/>
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+      <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+    </symbol>
+    <symbol id="ic-gear" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </symbol>
+    <symbol id="ic-plus" viewBox="0 0 24 24">
+      <line x1="12" y1="5" x2="12" y2="19"/>
+      <line x1="5" y1="12" x2="19" y2="12"/>
+    </symbol>
+    <symbol id="ic-walkin" viewBox="0 0 24 24">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+      <circle cx="8.5" cy="7" r="4"/>
+      <line x1="20" y1="8" x2="20" y2="14"/>
+      <line x1="17" y1="11" x2="23" y2="11"/>
+    </symbol>
+  </svg>
+
+  <!-- 左サイドバー -->
+  <aside class="rail" id="rail">
     <div class="rail-logo" data-i18n="appTitle"></div>
-    <button class="rail-btn active" data-railview="seat">
-      <span class="rail-ic">🗓</span><span class="rail-label" data-i18n="seatMgmt"></span>
+    <button class="rail-btn active" data-view="timetable">
+      <span class="rail-ic"><svg class="ic"><use href="#ic-calendar"/></svg></span>
+      <span class="rail-label" data-i18n="timetable"></span>
     </button>
-    <button class="rail-btn" data-railview="customers">
-      <span class="rail-ic">👥</span><span class="rail-label" data-i18n="customers"></span>
+    <button class="rail-btn" data-view="list">
+      <span class="rail-ic"><svg class="ic"><use href="#ic-list"/></svg></span>
+      <span class="rail-label" data-i18n="list"></span>
+    </button>
+    <button class="rail-btn" data-view="customers">
+      <span class="rail-ic"><svg class="ic"><use href="#ic-users"/></svg></span>
+      <span class="rail-label" data-i18n="customers"></span>
     </button>
     <button class="rail-btn" id="railSettings">
-      <span class="rail-ic">⚙</span><span class="rail-label" data-i18n="settings"></span>
+      <span class="rail-ic"><svg class="ic"><use href="#ic-gear"/></svg></span>
+      <span class="rail-label" data-i18n="settings"></span>
     </button>
     <div class="spacer"></div>
     <div class="lang-switch rail-lang" id="langSwitch">
@@ -41,20 +86,15 @@
         <button id="btnToday" class="btn ghost small" data-i18n="today"></button>
       </div>
 
-      <nav class="view-switch" id="viewSwitch">
-        <button class="vs-btn active" data-view="timetable" data-i18n="timetable"></button>
-        <button class="vs-btn" data-view="list" data-i18n="list"></button>
-      </nav>
-
       <div class="topbar-right">
         <span class="day-summary" id="daySummary"></span>
-        <button id="btnSettings" class="icon-btn phone-only">⚙</button>
+        <button id="btnSettings" class="icon-btn phone-only"><svg class="ic"><use href="#ic-gear"/></svg></button>
         <div class="lang-switch phone-only" id="langSwitchPhone">
           <button data-lang="ja">JA</button>
           <button data-lang="vi">VI</button>
         </div>
-        <button id="btnWalkIn" class="btn secondary hide-phone">🚶 <span data-i18n="walkIn"></span></button>
-        <button id="btnNew" class="btn primary hide-phone">＋ <span data-i18n="newReservation"></span></button>
+        <button id="btnWalkIn" class="btn secondary hide-phone"><svg class="ic"><use href="#ic-walkin"/></svg> <span data-i18n="walkIn"></span></button>
+        <button id="btnNew" class="btn primary hide-phone"><svg class="ic"><use href="#ic-plus"/></svg> <span data-i18n="newReservation"></span></button>
       </div>
     </header>
 
@@ -79,13 +119,13 @@
 
   <!-- スマホ用 下部ナビ / FAB -->
   <nav class="bottom-nav" id="bottomNav">
-    <button class="bn-btn active" data-view="timetable"><span class="bn-ic">🗓</span><span data-i18n="timetable"></span></button>
-    <button class="bn-btn" data-view="list"><span class="bn-ic">📋</span><span data-i18n="list"></span></button>
-    <button class="bn-btn" data-view="customers"><span class="bn-ic">👥</span><span data-i18n="customers"></span></button>
+    <button class="bn-btn active" data-view="timetable"><span class="bn-ic"><svg class="ic"><use href="#ic-calendar"/></svg></span><span data-i18n="timetable"></span></button>
+    <button class="bn-btn" data-view="list"><span class="bn-ic"><svg class="ic"><use href="#ic-list"/></svg></span><span data-i18n="list"></span></button>
+    <button class="bn-btn" data-view="customers"><span class="bn-ic"><svg class="ic"><use href="#ic-users"/></svg></span><span data-i18n="customers"></span></button>
   </nav>
   <div class="fabs">
-    <button id="fabWalkIn" class="fab secondary" title="walk-in">🚶</button>
-    <button id="fabNew" class="fab primary" title="new">＋</button>
+    <button id="fabWalkIn" class="fab secondary" title="walk-in"><svg class="ic"><use href="#ic-walkin"/></svg></button>
+    <button id="fabNew" class="fab primary" title="new"><svg class="ic"><use href="#ic-plus"/></svg></button>
   </div>
 
   <!-- Reservation modal -->
@@ -194,7 +234,7 @@
           <span></span>
         </div>
         <div id="tblRows"></div>
-        <button class="btn ghost full" id="btnAddTable">＋ <span data-i18n="addTable"></span></button>
+        <button class="btn ghost full" id="btnAddTable"><svg class="ic"><use href="#ic-plus"/></svg> <span data-i18n="addTable"></span></button>
       </div>
       <div class="modal-footer">
         <span class="spacer"></span>
@@ -204,7 +244,7 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=4"></script>
-  <script src="app.js?v=4"></script>
+  <script src="i18n.js?v=5"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

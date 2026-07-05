@@ -39,6 +39,15 @@ body {
 .spacer { flex: 1; }
 .phone-only { display: none !important; }
 
+/* dinii風 細線SVGアイコン */
+svg.ic {
+  width: 20px; height: 20px; display: block; flex: none;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+}
+.btn svg.ic { width: 17px; height: 17px; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; }
+
 /* ===== 左サイドバー ===== */
 .rail {
   width: 84px; min-width: 84px;
@@ -63,8 +72,9 @@ body {
 .rail-btn .rail-ic {
   width: 40px; height: 40px; border-radius: 10px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 19px; background: transparent;
+  background: transparent;
 }
+.rail-btn .rail-ic svg.ic { width: 21px; height: 21px; }
 .rail-btn .rail-label { font-size: 10.5px; font-weight: 600; }
 .rail-btn.active { color: var(--blue); }
 .rail-btn.active .rail-ic { background: var(--blue); color: #fff; }
@@ -102,14 +112,6 @@ body {
 .date-box input {
   position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer;
 }
-
-.view-switch { display: flex; border: 1px solid var(--line-strong); border-radius: 10px; overflow: hidden; }
-.vs-btn {
-  border: none; background: #fff; color: var(--muted);
-  padding: 10px 22px; font-size: 14.5px; cursor: pointer; white-space: nowrap; font-weight: 600;
-}
-.vs-btn + .vs-btn { border-left: 1px solid var(--line-strong); }
-.vs-btn.active { color: var(--blue); box-shadow: inset 0 0 0 2px var(--blue); background: #fff; }
 
 .topbar-right { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
 .day-summary { font-size: 14px; color: var(--text); font-weight: 700; white-space: nowrap; }
@@ -399,7 +401,6 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
 
 /* ===== tablet portrait ===== */
 @media (max-width: 1000px) {
-  .vs-btn { padding: 10px 14px; font-size: 13.5px; }
   .day-summary { font-size: 12.5px; }
 }
 
@@ -411,7 +412,6 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
   .hide-phone { display: none !important; }
 
   .topbar { padding: 8px 10px; gap: 8px; }
-  .view-switch { display: none; }
   .nav-btn { width: 40px; height: 40px; font-size: 18px; }
   .date-box { min-height: 40px; padding: 6px 12px; font-size: 14px; }
   .btn.small { min-height: 40px; padding: 6px 10px; }
@@ -428,7 +428,7 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
     font-size: 10.5px; display: flex; flex-direction: column; align-items: center;
     gap: 2px; padding: 6px 4px; border-radius: 10px; cursor: pointer; font-weight: 600;
   }
-  .bn-btn .bn-ic { font-size: 20px; }
+  .bn-btn .bn-ic svg.ic { width: 22px; height: 22px; }
   .bn-btn.active { color: var(--blue); background: var(--blue-soft); }
 
   .fabs {
@@ -438,10 +438,11 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
   }
   .fab {
     width: 58px; height: 58px; border-radius: 50%; border: none;
-    font-size: 26px; cursor: pointer;
+    cursor: pointer;
     box-shadow: 0 4px 14px rgba(31,41,55,.3);
     display: flex; align-items: center; justify-content: center;
   }
+  .fab svg.ic { width: 25px; height: 25px; }
   .fab.primary { background: var(--blue); color: #fff; }
   .fab.secondary { background: #fff; color: var(--text); border: 1px solid var(--line-strong); }
 

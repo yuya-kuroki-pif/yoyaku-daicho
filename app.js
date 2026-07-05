@@ -799,14 +799,9 @@ function saveSettings() {
 /* ---------- view switching / render ---------- */
 function setView(v) {
   view = v;
-  document.querySelectorAll('#viewSwitch .vs-btn, #bottomNav .bn-btn').forEach((b) => {
+  document.querySelectorAll('.rail-btn[data-view], #bottomNav .bn-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.view === v);
   });
-  // サイドバー: タイムライン/予約一覧は「席管理」に属する
-  document.querySelectorAll('.rail-btn[data-railview]').forEach((b) => {
-    b.classList.toggle('active', b.dataset.railview === (v === 'customers' ? 'customers' : 'seat'));
-  });
-  document.getElementById('viewSwitch').classList.toggle('hidden', v === 'customers');
   document.getElementById('view-timetable').classList.toggle('hidden', v !== 'timetable');
   document.getElementById('view-list').classList.toggle('hidden', v !== 'list');
   document.getElementById('view-customers').classList.toggle('hidden', v !== 'customers');
@@ -836,15 +831,8 @@ function init() {
     const btn = e.target.closest('[data-view]');
     if (btn) setView(btn.dataset.view);
   };
-  document.getElementById('viewSwitch').addEventListener('click', onNavClick);
+  document.getElementById('rail').addEventListener('click', onNavClick);
   document.getElementById('bottomNav').addEventListener('click', onNavClick);
-
-  // サイドバー
-  document.querySelectorAll('.rail-btn[data-railview]').forEach((b) => {
-    b.addEventListener('click', () => {
-      setView(b.dataset.railview === 'customers' ? 'customers' : 'timetable');
-    });
-  });
   document.getElementById('railSettings').addEventListener('click', openSettingsModal);
 
   const onLangClick = (e) => {
