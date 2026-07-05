@@ -334,7 +334,9 @@ function renderTimetable() {
 
     const label = document.createElement('div');
     label.className = 'tt-label';
-    label.innerHTML = `<span class="tname">${esc(tb.name)}</span><span class="tseats">${tb.seats} ${esc(t('seatsUnit'))}</span>`;
+    // 予約最小人数が設定されていれば「3〜4席」のように範囲表示
+    const seatsText = (tb.min && tb.min > 1 && tb.min < tb.seats) ? `${tb.min}〜${tb.seats}` : `${tb.seats}`;
+    label.innerHTML = `<span class="tname">${esc(tb.name)}</span><span class="tseats">${seatsText} ${esc(t('seatsUnit'))}</span>`;
     line.appendChild(label);
 
     const row = document.createElement('div');
