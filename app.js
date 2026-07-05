@@ -1019,7 +1019,7 @@ function renderSites() {
       `<div class="site-actions">` +
         `<button class="pill ${s.enabled ? 'on' : 'off'}" data-act="toggle">${esc(s.enabled ? t('acceptOn') : t('acceptOff'))}</button>` +
         `<button class="btn primary small" data-act="copy">${esc(t('copyUrl'))}</button>` +
-        `<button class="btn ghost small" data-act="open">${esc(t('openSite'))}</button>` +
+        `<button class="btn ghost small" data-act="edit">${esc(t('editSiteBtn'))}</button>` +
       `</div>`;
     card.querySelector('[data-act="toggle"]').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1036,9 +1036,9 @@ function renderSites() {
         setTimeout(() => { btn.textContent = t('copyUrl'); }, 1600);
       } catch (err) { prompt('URL', url); }
     });
-    card.querySelector('[data-act="open"]').addEventListener('click', (e) => {
+    card.querySelector('[data-act="edit"]').addEventListener('click', (e) => {
       e.stopPropagation();
-      window.open(url, '_blank');
+      openSiteModal(s.id);
     });
     card.addEventListener('click', () => openSiteModal(s.id));
     wrap.appendChild(card);
@@ -1100,6 +1100,7 @@ function openSiteModal(siteId) {
   siteModalTables = new Set(s ? s.tableIds : []);
   renderSiteColors();
   renderSiteTables();
+  renderSiteCombos();
   // 自社サイトは削除不可（URL発行元のため）
   document.getElementById('btnSiteDelete').classList.toggle('hidden', !s || !!s.own);
   document.getElementById('siteModal').classList.remove('hidden');
@@ -1129,6 +1130,32 @@ function renderSiteTables() {
     chip.addEventListener('click', () => {
       if (siteModalTables.has(tb.id)) siteModalTables.delete(tb.id); else siteModalTables.add(tb.id);
       renderSiteTables();
+      renderSiteCombos();
+    });
+    wrap.appendChild(chip);
+  });
+}
+
+/* 結合テーブル（合席）をサイトに連携。選択すると構成卓すべてを連携済みにする */
+function renderSiteCombos() {
+  const wrap = document.getElementById('sCombos');
+  wrap.innerHTML = '';
+  const combos = (state.combos || []).filter((c) => c.tableIds.every((id) => tableById(id)));
+  if (!combos.length) {
+    wrap.innerHTML = `<div class="empty-note">${esc(t('noCombos'))}</div>`;
+    return;
+  }
+  combos.forEach((c) => {
+    const active = c.tableIds.every((id) => siteModalTables.has(id));
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip' + (active ? ' active' : '');
+    chip.textContent = `${c.tableIds.map((id) => tableById(id).name).join('+')} (〜${c.max}${t('seatsUnit')})`;
+    chip.addEventListener('click', () => {
+      if (active) c.tableIds.forEach((id) => siteModalTables.delete(id));
+      else c.tableIds.forEach((id) => siteModalTables.add(id));
+      renderSiteTables();
+      renderSiteCombos();
     });
     wrap.appendChild(chip);
   });
