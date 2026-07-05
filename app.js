@@ -243,7 +243,7 @@ function renderTimetable() {
   const rows = [];
 
   // 予約ブロック生成（fromTableId: null = 未配席行）
-  const makeBlock = (r, fromTableId) => {
+  const makeBlock = (r, fromTableId, span) => {
     const start = Math.max(r.start, openMin);
     const end = Math.min(r.start + r.duration, closeMin);
     if (end <= openMin || start >= closeMin) return null;
@@ -251,9 +251,10 @@ function renderTimetable() {
     let cls = 'tt-block ' + r.status;
     if (r.status === 'reserved' && r.course) cls += ' course';
     if (fromTableId === null) cls += ' unassigned';
+    if (span) cls += ' span'; // 複数卓を1つの枠として表示（グリッド直下に配置）
     block.className = cls;
     block.dataset.resId = r.id;
-    block.style.left = ((start - openMin) / SLOT_MIN) * m.slotW + 1 + 'px';
+    block.style.left = (span ? m.labelW : 0) + ((start - openMin) / SLOT_MIN) * m.slotW + 1 + 'px';
     block.style.width = ((end - start) / SLOT_MIN) * m.slotW - 3 + 'px';
     if (r.status === 'block') {
       // 予約ブロック（ネット予約の在庫から除外される帯）
@@ -346,18 +347,41 @@ function renderTimetable() {
       openCellPopover(e.clientX, e.clientY, defaultStart(), [tb.id], 120);
     });
 
-    resList
-      .filter((r) => (r.tableIds || []).includes(tb.id) && r.status !== 'cancelled')
-      .forEach((r) => {
-        const block = makeBlock(r, tb.id);
-        if (block) row.appendChild(block);
-      });
-
     attachRowTap(row, tb.id);
     line.appendChild(row);
     grid.appendChild(line);
     rows.push({ tableId: tb.id, lineEl: line, rowEl: row });
   });
+
+  // 予約ブロックの配置: 複数卓は連続する行をまとめて1つの枠として表示
+  const spanBlocks = [];
+  const idxByTable = new Map(rows.map((rw, i) => [rw.tableId, i]));
+  resList
+    .filter((r) => r.status !== 'cancelled' && (r.tableIds || []).length)
+    .forEach((r) => {
+      const idxs = [...new Set(r.tableIds.map((id) => idxByTable.get(id)).filter((i) => i !== undefined && i > 0))]
+        .sort((a, b) => a - b);
+      if (!idxs.length) return;
+      // 連続した行ごとにまとめる（離れた卓は別の枠）
+      const runs = [[idxs[0]]];
+      for (let k = 1; k < idxs.length; k++) {
+        if (idxs[k] === idxs[k - 1] + 1) runs[runs.length - 1].push(idxs[k]);
+        else runs.push([idxs[k]]);
+      }
+      runs.forEach((run) => {
+        const anchorTable = rows[run[0]].tableId;
+        if (run.length === 1) {
+          const block = makeBlock(r, anchorTable);
+          if (block) rows[run[0]].rowEl.appendChild(block);
+        } else {
+          const block = makeBlock(r, anchorTable, true);
+          if (block) {
+            grid.appendChild(block);
+            spanBlocks.push({ el: block, first: run[0], last: run[run.length - 1] });
+          }
+        }
+      });
+    });
 
   // 現在時刻ライン
   if (currentDate === todayStr()) {
@@ -372,6 +396,16 @@ function renderTimetable() {
   }
 
   wrap.replaceChildren(grid);
+
+  // 複数卓の枠を行位置に合わせて縦に伸ばす（DOM配置後に実寸で計算）
+  spanBlocks.forEach(({ el, first, last }) => {
+    const top = rows[first].lineEl.offsetTop + 5;
+    const bottom = rows[last].lineEl.offsetTop + rows[last].lineEl.offsetHeight - 6;
+    el.style.top = top + 'px';
+    el.style.height = (bottom - top) + 'px';
+    el.style.bottom = 'auto';
+  });
+
   ttCtx = { grid, scroll: wrap, rows, openMin, closeMin, metrics: m };
   renderLegend();
 }
@@ -554,7 +588,19 @@ function onDragUp() {
     let newTableIds;
     if (d.newTableId === null) newTableIds = [];
     else if (d.fromTableId === null) newTableIds = [d.newTableId];
-    else newTableIds = [...new Set((r.tableIds || []).map((id) => (id === d.fromTableId ? d.newTableId : id)))];
+    else if ((r.tableIds || []).length > 1) {
+      // 複数卓（1つの枠）はまとめて行方向へ平行移動。はみ出す場合は席を変えない
+      const idxOf = (id) => ttCtx.rows.findIndex((rw) => rw.tableId === id);
+      const delta = idxOf(d.newTableId) - idxOf(d.fromTableId);
+      const shifted = r.tableIds.map((id) => {
+        const i = idxOf(id);
+        const target = i > 0 ? ttCtx.rows[i + delta] : null;
+        return target && target.tableId ? target.tableId : null;
+      });
+      newTableIds = shifted.every(Boolean) ? [...new Set(shifted)] : r.tableIds;
+    } else {
+      newTableIds = [...new Set((r.tableIds || []).map((id) => (id === d.fromTableId ? d.newTableId : id)))];
+    }
     const updated = { ...r, start: d.newStart, tableIds: newTableIds };
     if (hasConflict(updated) && !confirm(t('conflictWarn'))) { renderTimetable(); return; }
     Object.assign(r, updated);

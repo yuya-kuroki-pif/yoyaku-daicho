@@ -255,6 +255,8 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
 .tt-block.block .b-name { color: #55636d; }
 
 .tt-block.drag-src { opacity: .35; }
+/* 複数卓を1つの枠として縦に結合表示 */
+.tt-block.span { box-shadow: 0 2px 8px rgba(31,41,55,.2); z-index: 2; }
 .tt-ghost {
   z-index: 8; pointer-events: none; opacity: .95;
   box-shadow: 0 8px 22px rgba(31,41,55,.3);
