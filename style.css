@@ -239,6 +239,12 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
   background: #fff5f5; border: 1.5px dashed var(--red); color: var(--red);
 }
 .tt-block.unassigned .b-name { color: var(--red); }
+/* 予約ブロック（斜線ストライプ・ネット予約在庫から除外） */
+.tt-block.block {
+  background: repeating-linear-gradient(45deg, #e2e8ee 0 6px, #f3f6f9 6px 12px);
+  border: 1px dashed #8b98a3; color: #55636d;
+}
+.tt-block.block .b-name { color: #55636d; }
 
 .tt-block.drag-src { opacity: .35; }
 .tt-ghost {
@@ -299,11 +305,14 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
   cursor: pointer; min-height: 44px;
 }
 .cp-pax button:active { background: var(--blue-soft); }
-.cp-detail {
-  width: 100%; margin-top: 8px;
-  border: none; background: transparent; color: var(--blue);
-  font-size: 13px; font-weight: 600; cursor: pointer; padding: 8px 4px;
+.cp-block {
+  width: 100%; margin-top: 10px;
+  border: none; background: #55636d; color: #fff;
+  border-radius: 10px; padding: 11px 8px; min-height: 44px;
+  font-size: 13.5px; font-weight: 700; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
 }
+.cp-block:active { background: #45525c; }
 
 .legend {
   display: flex; gap: 14px; padding: 7px 14px;

@@ -20,6 +20,9 @@ const I18N = {
     statusFinished: '退店済',
     statusNoshow: 'ノーショー',
     statusCancelled: 'キャンセル',
+    statusBlock: 'ブロック',
+    blockBtn: 'ブロック',
+    unblockConfirm: 'このブロックを解除しますか？',
 
     newResTitle: '新規予約',
     editResTitle: '予約の編集',
@@ -120,6 +123,9 @@ const I18N = {
     statusFinished: 'Đã rời đi',
     statusNoshow: 'Không đến',
     statusCancelled: 'Đã hủy',
+    statusBlock: 'Chặn đặt bàn',
+    blockBtn: 'Chặn khung giờ',
+    unblockConfirm: 'Bỏ chặn khung giờ này?',
 
     newResTitle: 'Đặt bàn mới',
     editResTitle: 'Sửa thông tin đặt bàn',

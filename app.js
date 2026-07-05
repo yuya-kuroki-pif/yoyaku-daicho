@@ -157,7 +157,7 @@ function renderDateBar() {
   document.getElementById('dateDisplay').textContent = dict().fmtDateBox(y, m, d, wd);
   document.getElementById('datePicker').value = currentDate;
 
-  const list = dayReservations(currentDate).filter((r) => r.status !== 'cancelled' && r.status !== 'noshow');
+  const list = dayReservations(currentDate).filter((r) => r.status !== 'cancelled' && r.status !== 'noshow' && r.status !== 'block');
   const guests = list.reduce((sum, r) => sum + (r.adults || 0) + (r.children || 0), 0);
   document.getElementById('daySummary').textContent = dict().fmtSummary(list.length, guests);
 }
@@ -241,10 +241,17 @@ function renderTimetable() {
     block.dataset.resId = r.id;
     block.style.left = ((start - openMin) / SLOT_MIN) * m.slotW + 1 + 'px';
     block.style.width = ((end - start) / SLOT_MIN) * m.slotW - 3 + 'px';
-    const info = r.memo ? esc(r.memo) : `${fmtTime(r.start)}-${fmtTime(r.start + r.duration)}`;
-    block.innerHTML =
-      `<div class="b-name">${blockNameHtml(r, visitMap)}</div>` +
-      `<div class="b-info">${info}</div>`;
+    if (r.status === 'block') {
+      // 予約ブロック（ネット予約の在庫から除外される帯）
+      block.innerHTML =
+        `<div class="b-name">🚫 ${esc(t('statusBlock'))}</div>` +
+        `<div class="b-info">${fmtTime(r.start)}-${fmtTime(r.start + r.duration)}</div>`;
+    } else {
+      const info = r.memo ? esc(r.memo) : `${fmtTime(r.start)}-${fmtTime(r.start + r.duration)}`;
+      block.innerHTML =
+        `<div class="b-name">${blockNameHtml(r, visitMap)}</div>` +
+        `<div class="b-info">${info}</div>`;
+    }
 
     // 右端: 滞在時間変更ハンドル
     const rh = document.createElement('div');
@@ -349,6 +356,7 @@ function renderLegend() {
     { color: 'var(--gray-block)', label: statusLabel('finished') },
     { color: 'var(--red)', label: statusLabel('noshow') },
     { color: 'var(--pink-bg)', label: t('unassigned') },
+    { color: 'repeating-linear-gradient(45deg, #e2e8ee 0 4px, #f6f8fa 4px 8px)', label: statusLabel('block') },
   ];
   document.getElementById('legend').innerHTML =
     items.map((it) =>
@@ -496,8 +504,18 @@ function onDragUp() {
   drag = null;
 
   if (!d.started) {
-    // 動かさずに離した → タップ＝詳細を開く（リサイズハンドルは無視）
-    if (d.mode === 'move') openResModal(d.resId);
+    // 動かさずに離した → タップ＝詳細を開く（ブロックは解除確認、リサイズハンドルは無視）
+    if (d.mode === 'move') {
+      if (d.r.status === 'block') {
+        if (confirm(t('unblockConfirm'))) {
+          state.reservations = state.reservations.filter((x) => x.id !== d.resId);
+          save();
+          renderAll();
+        }
+      } else {
+        openResModal(d.resId);
+      }
+    }
     return;
   }
 
@@ -543,7 +561,7 @@ function cleanupDragVisuals(d) {
 /* ---------- list view ---------- */
 function renderList() {
   const wrap = document.getElementById('listWrap');
-  const list = dayReservations(currentDate);
+  const list = dayReservations(currentDate).filter((r) => r.status !== 'block');
   if (!list.length) {
     wrap.innerHTML = `<div class="empty-note">${esc(t('noReservations'))}</div>`;
     return;
@@ -583,6 +601,7 @@ function renderList() {
 function buildCustomers() {
   const map = new Map();
   state.reservations.forEach((r) => {
+    if (r.status === 'block') return;
     if (!r.name && !r.phone) return;
     const key = r.phone ? 'p:' + r.phone : 'n:' + r.name;
     if (!map.has(key)) map.set(key, { name: r.name, kana: r.kana, phone: r.phone, visits: 0, lastVisit: '' });
@@ -646,6 +665,9 @@ function openCellPopover(clientX, clientY, start, tableId, rowEl) {
   const tbName = tableId ? (tableById(tableId)?.name || '') : t('unassigned');
   document.getElementById('cpInfo').textContent = `${tbName}　${fmtTime(start)}〜`;
 
+  // ブロックはテーブルが決まっている場合のみ（未配席行では非表示）
+  document.getElementById('cpBlock').classList.toggle('hidden', !tableId);
+
   setCpMode('res');
 
   const paxWrap = document.getElementById('cpPax');
@@ -677,6 +699,30 @@ function onCpPax(n) {
   closeCellPopover();
   if (mode === 'walkin') createWalkIn(start, tableId, n);
   else openResModal(null, { start, tableId, adults: n });
+}
+
+/* 予約ブロック: この席・時間帯をネット予約の在庫から外す */
+function createBlock(start, tableId) {
+  if (!tableId) return;
+  state.reservations.push({
+    id: uid(),
+    date: currentDate,
+    start,
+    duration: 120,
+    adults: 0,
+    children: 0,
+    name: t('statusBlock'),
+    kana: '',
+    phone: '',
+    tableIds: [tableId],
+    course: '',
+    memo: '',
+    status: 'block',
+    walkIn: false,
+    channel: '',
+  });
+  save();
+  renderAll();
 }
 
 function closeCellPopover() {
@@ -1180,11 +1226,11 @@ function init() {
   // ポップオーバー
   document.getElementById('cpTabRes').addEventListener('click', () => setCpMode('res'));
   document.getElementById('cpTabWalkIn').addEventListener('click', () => setCpMode('walkin'));
-  document.getElementById('cpDetail').addEventListener('click', () => {
+  document.getElementById('cpBlock').addEventListener('click', () => {
     if (!cellPick) return;
     const { start, tableId } = cellPick;
     closeCellPopover();
-    openResModal(null, { start, tableId });
+    createBlock(start, tableId);
   });
   // ポップオーバーの外側をタップで閉じる
   document.addEventListener('pointerdown', (e) => {
