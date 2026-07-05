@@ -65,6 +65,8 @@ const I18N = {
     walkInName: 'ウォークイン',
 
     dragHint: '💡 予約は長押しして移動／右端をドラッグで滞在時間を変更',
+    resTab: '予約',
+    detailInput: '詳細を入力…',
     secWhen: '日時・人数',
     secTable: 'テーブル',
     secGuest: 'お客様情報',
@@ -142,6 +144,8 @@ const I18N = {
     walkInName: 'Khách vãng lai',
 
     dragHint: '💡 Giữ khối đặt bàn để di chuyển / kéo mép phải để đổi thời gian ở lại',
+    resTab: 'Đặt bàn',
+    detailInput: 'Nhập chi tiết…',
     secWhen: 'Ngày giờ & số khách',
     secTable: 'Bàn',
     secGuest: 'Thông tin khách hàng',
