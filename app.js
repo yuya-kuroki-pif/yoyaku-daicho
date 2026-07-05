@@ -81,6 +81,8 @@ function defaultState() {
     reservations,
     sites: defaultSites(),
     sitesV2: true,
+    tablesV2: true,
+    combos: [{ id: 'cb1', tableIds: ['t1', 't2'], max: 8 }],
     settings: { lang: 'ja', openMin: 11 * 60, closeMin: 23 * 60 },
   };
 }
@@ -123,6 +125,11 @@ function load() {
         const defs = { t1: 'ホール', t2: 'ホール', t3: 'ホール', t4: 'ホール', t5: 'カウンター', t6: 'カウンター', t7: '個室' };
         state.tables.forEach((tb) => { if (tb.group === undefined) tb.group = defs[tb.id] || ''; });
         state.tablesV2 = true;
+        save();
+      }
+      if (!state.combos) {
+        // 結合（合席）の初期サンプル: T1+T2で8名まで
+        state.combos = (tableById('t1') && tableById('t2')) ? [{ id: uid(), tableIds: ['t1', 't2'], max: 8 }] : [];
         save();
       }
       return;
@@ -1299,7 +1306,50 @@ function openSettingsModal() {
   const wrap = document.getElementById('tblRows');
   wrap.innerHTML = '';
   state.tables.forEach((tb) => addTableRow(tb));
+
+  // 結合（合席）設定の作業コピー
+  comboWork = (state.combos || []).map((c) => ({ ...c, tableIds: [...c.tableIds] }));
+  renderComboRows();
+
   document.getElementById('settingsModal').classList.remove('hidden');
+}
+
+/* 結合テーブル（合席）設定 */
+let comboWork = [];
+function renderComboRows() {
+  const wrap = document.getElementById('comboRows');
+  wrap.innerHTML = '';
+  comboWork.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'combo-row';
+    const chips = document.createElement('div');
+    chips.className = 'combo-tables';
+    state.tables.forEach((tb) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip' + (c.tableIds.includes(tb.id) ? ' active' : '');
+      chip.textContent = `${tb.name} (${tb.seats})`;
+      chip.addEventListener('click', () => {
+        if (c.tableIds.includes(tb.id)) c.tableIds = c.tableIds.filter((id) => id !== tb.id);
+        else c.tableIds.push(tb.id);
+        // 最大人数は席数合計で自動計算（保存前に手動調整可）
+        c.max = c.tableIds.reduce((s, id) => s + (tableById(id)?.seats || 0), 0);
+        renderComboRows();
+      });
+      chips.appendChild(chip);
+    });
+    const foot = document.createElement('div');
+    foot.className = 'combo-foot';
+    foot.innerHTML =
+      `<label>${esc(t('comboMax'))}</label>` +
+      `<input type="number" min="1" max="99" value="${c.max || 0}">` +
+      `<button type="button" class="icon-btn">🗑</button>`;
+    foot.querySelector('input').addEventListener('change', (e) => { c.max = Math.max(1, Number(e.target.value) || 1); });
+    foot.querySelector('.icon-btn').addEventListener('click', () => { comboWork.splice(i, 1); renderComboRows(); });
+    row.appendChild(chips);
+    row.appendChild(foot);
+    wrap.appendChild(row);
+  });
 }
 
 function addTableRow(tb) {
@@ -1332,6 +1382,10 @@ function saveSettings() {
     tables.push({ id: row.dataset.id || uid(), name, seats, group });
   });
   if (tables.length) state.tables = tables;
+  // 結合設定を保存（存在するテーブル2卓以上のみ有効）
+  state.combos = comboWork
+    .map((c) => ({ ...c, tableIds: c.tableIds.filter((id) => state.tables.some((tb) => tb.id === id)) }))
+    .filter((c) => c.tableIds.length >= 2 && (c.max || 0) >= 1);
   save();
   document.getElementById('settingsModal').classList.add('hidden');
   renderAll();
@@ -1455,6 +1509,24 @@ function chatExecute(text) {
     tables.forEach((tb) => { tb.seats = +scm[1]; });
     save();
     return `✅ ${tables.map((tb) => tb.name).join(', ')} → ${scm[1]}${t('seatsUnit')} — ${t('chatUpdated')}`;
+  }
+
+  // 結合解除: 「T1とT2の結合を解除」
+  if (/(結合|合席|ghép)/.test(lower) && /(解除|削除|bỏ|xóa)/.test(lower) && tableIds.length) {
+    const before = (state.combos || []).length;
+    state.combos = (state.combos || []).filter((c) => !c.tableIds.some((id) => tableIds.includes(id)));
+    if (state.combos.length === before) return t('chatNotFound');
+    save();
+    return `✅ ${tables.map((tb) => tb.name).join('+')} — ${t('chatDeleted')}`;
+  }
+
+  // 結合（合席）: 「T1とT2を合わせて8名まで」
+  if (/(結合|合わせて|合席|ghép)/.test(lower) && tableIds.length >= 2) {
+    const max = pax || tables.reduce((s, tb) => s + tb.seats, 0);
+    state.combos = state.combos || [];
+    state.combos.push({ id: uid(), tableIds, max });
+    save();
+    return `✅ ${tables.map((tb) => tb.name).join('+')} → ${dict().fmtPax(max)} — ${t('chatUpdated')}`;
   }
 
   // テーブル削除: 「T9を削除」
@@ -1679,6 +1751,10 @@ function init() {
   document.getElementById('btnSetCancel').addEventListener('click', () => document.getElementById('settingsModal').classList.add('hidden'));
   document.getElementById('btnSetSave').addEventListener('click', saveSettings);
   document.getElementById('btnAddTable').addEventListener('click', () => addTableRow(null));
+  document.getElementById('btnAddCombo').addEventListener('click', () => {
+    comboWork.push({ id: uid(), tableIds: [], max: 0 });
+    renderComboRows();
+  });
 
   document.getElementById('custSearch').addEventListener('input', () => {
     if (view === 'customers') renderCustomers();

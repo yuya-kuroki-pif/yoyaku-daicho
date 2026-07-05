@@ -533,6 +533,26 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
 }
 .tbl-row .icon-btn { color: var(--red); }
 
+/* 結合テーブル（合席）設定 */
+.combo-heading {
+  font-size: 13px; color: var(--blue); font-weight: 700;
+  border-bottom: 1px solid var(--line); padding-bottom: 4px; margin: 22px 0 6px;
+}
+.combo-note { font-size: 12px; color: var(--muted); line-height: 1.6; margin-bottom: 10px; }
+.combo-row {
+  border: 1px solid var(--line-strong); border-radius: 12px;
+  padding: 10px 12px; margin-bottom: 10px;
+}
+.combo-tables { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.combo-tables .chip { padding: 7px 12px; font-size: 13px; min-height: 38px; }
+.combo-foot { display: flex; align-items: center; gap: 8px; }
+.combo-foot label { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.combo-foot input {
+  width: 84px; border: 1px solid var(--line-strong); border-radius: 10px;
+  padding: 9px 10px; font-size: 16px; min-height: 44px;
+}
+.combo-foot .icon-btn { margin-left: auto; color: var(--red); }
+
 /* ===== tablet portrait ===== */
 @media (max-width: 1000px) {
   .day-summary { font-size: 12.5px; }

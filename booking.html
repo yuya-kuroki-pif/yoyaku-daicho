@@ -123,15 +123,33 @@
       return sites.find(s => s.id === siteParam) || sites.find(s => s.own);
     }
 
-    /* 指定日時に空いている連携テーブル（人数が座れる席のみ） */
-    function freeTables(st, site, date, start, pax) {
+    /* 指定日時・人数で確保するテーブルを決定（1卓 → 結合テーブルの順に探す）
+     * 戻り値: 確保するテーブルIDの配列 / 空きがなければ null */
+    function findAssignment(st, site, date, start, pax) {
       const actives = st.reservations.filter(r =>
         r.date === date && r.status !== 'cancelled' && r.status !== 'noshow');
-      return site.tableIds
-        .map(id => st.tables.find(tb => tb.id === id))
-        .filter(tb => tb && tb.seats >= pax)
-        .filter(tb => !actives.some(r =>
-          (r.tableIds || []).includes(tb.id) && r.start < start + DUR && start < r.start + r.duration));
+      const isFree = (id) => !actives.some(r =>
+        (r.tableIds || []).includes(id) && r.start < start + DUR && start < r.start + r.duration);
+      const linked = new Set(site.tableIds);
+
+      // 1卓で入る場合は人数に近い席から
+      const singles = st.tables
+        .filter(tb => linked.has(tb.id) && tb.seats >= pax && isFree(tb.id));
+      if (singles.length) {
+        singles.sort((a, b) => a.seats - b.seats);
+        return [singles[0].id];
+      }
+
+      // 結合テーブル（合席）: 全卓がこのサイトに連携済みかつ空いていること
+      const combos = (st.combos || []).filter(c =>
+        (c.max || 0) >= pax &&
+        c.tableIds.length >= 2 &&
+        c.tableIds.every(id => linked.has(id) && st.tables.some(tb => tb.id === id) && isFree(id)));
+      if (combos.length) {
+        combos.sort((a, b) => a.max - b.max);
+        return [...combos[0].tableIds];
+      }
+      return null;
     }
 
     function render() {
@@ -156,9 +174,9 @@
       let timesHtml = '';
       for (let m = openMin; m <= lastStart; m += 30) {
         if (selDate === todayStr() && m < nowMin) continue;
-        const free = freeTables(st, site, selDate, m, selPax).length;
+        const ok = !!findAssignment(st, site, selDate, m, selPax);
         const sel = selTime === m ? ' sel' : '';
-        timesHtml += `<button type="button" data-time="${m}" ${free ? '' : 'disabled'} class="${sel.trim()}">${fmtTime(m)}</button>`;
+        timesHtml += `<button type="button" data-time="${m}" ${ok ? '' : 'disabled'} class="${sel.trim()}">${fmtTime(m)}</button>`;
       }
 
       el.innerHTML =
@@ -215,9 +233,8 @@
       const st = db();
       const site = ownSite(st);
       if (!site || !site.enabled) { render(); return; }
-      const free = freeTables(st, site, selDate, selTime, selPax);
-      if (!free.length) { alert(t('taken')); selTime = null; keepInputs(render); return; }
-      free.sort((a, b) => a.seats - b.seats); // 人数に近い席から割当
+      const assign = findAssignment(st, site, selDate, selTime, selPax);
+      if (!assign) { alert(t('taken')); selTime = null; keepInputs(render); return; }
 
       const res = {
         id: uid(),
@@ -229,7 +246,7 @@
         name,
         kana: '',
         phone: document.getElementById('bPhone').value.trim(),
-        tableIds: [free[0].id],
+        tableIds: assign,
         course: '',
         memo: document.getElementById('bMemo').value.trim(),
         status: 'reserved',

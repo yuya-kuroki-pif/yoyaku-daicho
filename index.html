@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=17">
+  <link rel="stylesheet" href="style.css?v=18">
 </head>
 <body>
   <!-- dinii風 細線SVGアイコン定義 -->
@@ -279,6 +279,11 @@
         </div>
         <div id="tblRows"></div>
         <button class="btn ghost full" id="btnAddTable"><svg class="ic"><use href="#ic-plus"/></svg> <span data-i18n="addTable"></span></button>
+
+        <h3 class="combo-heading" data-i18n="comboHeading"></h3>
+        <p class="combo-note" data-i18n="comboNote"></p>
+        <div id="comboRows"></div>
+        <button class="btn ghost full" id="btnAddCombo"><svg class="ic"><use href="#ic-plus"/></svg> <span data-i18n="addCombo"></span></button>
       </div>
       <div class="modal-footer">
         <span class="spacer"></span>
@@ -320,7 +325,7 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=17"></script>
-  <script src="app.js?v=17"></script>
+  <script src="i18n.js?v=18"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>
