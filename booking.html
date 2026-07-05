@@ -132,9 +132,9 @@
         (r.tableIds || []).includes(id) && r.start < start + DUR && start < r.start + r.duration);
       const linked = new Set(site.tableIds);
 
-      // 1卓で入る場合は人数に近い席から
+      // 1卓で入る場合は人数に近い席から（予約最少人数の条件も満たすこと）
       const singles = st.tables
-        .filter(tb => linked.has(tb.id) && tb.seats >= pax && isFree(tb.id));
+        .filter(tb => linked.has(tb.id) && tb.seats >= pax && (tb.min || 1) <= pax && isFree(tb.id));
       if (singles.length) {
         singles.sort((a, b) => a.seats - b.seats);
         return [singles[0].id];
@@ -143,6 +143,7 @@
       // 結合テーブル（合席）: 全卓がこのサイトに連携済みかつ空いていること
       const combos = (st.combos || []).filter(c =>
         (c.max || 0) >= pax &&
+        (c.min || 1) <= pax &&
         c.tableIds.length >= 2 &&
         c.tableIds.every(id => linked.has(id) && st.tables.some(tb => tb.id === id) && isFree(id)));
       if (combos.length) {

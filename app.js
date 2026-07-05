@@ -1414,10 +1414,13 @@ function renderComboRows() {
     const foot = document.createElement('div');
     foot.className = 'combo-foot';
     foot.innerHTML =
+      `<label>${esc(t('comboMin'))}</label>` +
+      `<input type="number" class="cf-min" min="1" max="99" value="${c.min || 1}">` +
       `<label>${esc(t('comboMax'))}</label>` +
-      `<input type="number" min="1" max="99" value="${c.max || 0}">` +
+      `<input type="number" class="cf-max" min="1" max="99" value="${c.max || 0}">` +
       `<button type="button" class="icon-btn">🗑</button>`;
-    foot.querySelector('input').addEventListener('change', (e) => { c.max = Math.max(1, Number(e.target.value) || 1); });
+    foot.querySelector('.cf-min').addEventListener('change', (e) => { c.min = Math.max(1, Number(e.target.value) || 1); });
+    foot.querySelector('.cf-max').addEventListener('change', (e) => { c.max = Math.max(1, Number(e.target.value) || 1); });
     foot.querySelector('.icon-btn').addEventListener('click', () => { comboWork.splice(i, 1); renderComboRows(); });
     row.appendChild(chips);
     row.appendChild(foot);
@@ -1434,6 +1437,7 @@ function addTableRow(tb) {
     `<input type="text" class="tr-name" value="${esc(tb ? tb.name : '')}">` +
     `<input type="text" class="tr-group" placeholder="${esc(t('groupPlaceholder'))}" value="${esc(tb ? (tb.group || '') : '')}">` +
     `<input type="number" class="tr-seats" min="1" max="99" value="${tb ? tb.seats : 4}">` +
+    `<input type="number" class="tr-min" min="1" max="99" value="${tb ? (tb.min || 1) : 1}">` +
     `<button type="button" class="icon-btn tr-del">🗑</button>`;
   row.querySelector('.tr-del').addEventListener('click', () => row.remove());
   wrap.appendChild(row);
@@ -1451,13 +1455,18 @@ function saveSettings() {
     const name = row.querySelector('.tr-name').value.trim();
     if (!name) return;
     const seats = Math.max(1, Number(row.querySelector('.tr-seats').value) || 1);
+    const min = Math.min(seats, Math.max(1, Number(row.querySelector('.tr-min').value) || 1));
     const group = row.querySelector('.tr-group').value.trim();
-    tables.push({ id: row.dataset.id || uid(), name, seats, group });
+    tables.push({ id: row.dataset.id || uid(), name, seats, min, group });
   });
   if (tables.length) state.tables = tables;
   // 結合設定を保存（存在するテーブル2卓以上のみ有効）
   state.combos = comboWork
-    .map((c) => ({ ...c, tableIds: c.tableIds.filter((id) => state.tables.some((tb) => tb.id === id)) }))
+    .map((c) => ({
+      ...c,
+      tableIds: c.tableIds.filter((id) => state.tables.some((tb) => tb.id === id)),
+      min: Math.min(Math.max(1, c.min || 1), c.max || 1),
+    }))
     .filter((c) => c.tableIds.length >= 2 && (c.max || 0) >= 1);
   save();
   document.getElementById('settingsModal').classList.add('hidden');

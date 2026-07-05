@@ -45,6 +45,7 @@ const I18N = {
 
     tableName: 'テーブル名',
     seatsLabel: '席数',
+    minSeatsLabel: '最少人数',
     groupLabel: 'グループ',
     groupPlaceholder: '例: ホール',
     addTable: 'テーブルを追加',
@@ -52,6 +53,7 @@ const I18N = {
     comboHeading: '結合テーブル（合席）',
     comboNote: '組み合わせたテーブル全体で受けられる最大人数を設定します。1卓に入らない人数のネット予約は、結合テーブルが空いていれば自動で複数卓を確保します。',
     comboMax: '最大人数',
+    comboMin: '最少人数',
     addCombo: '結合を追加',
 
     chat: 'チャット',
@@ -175,12 +177,14 @@ const I18N = {
 
     tableName: 'Tên bàn',
     seatsLabel: 'Số ghế',
+    minSeatsLabel: 'Tối thiểu',
     groupLabel: 'Nhóm',
     groupPlaceholder: 'VD: Sảnh',
     addTable: 'Thêm bàn',
     seatsUnit: 'ghế',
     comboHeading: 'Ghép bàn',
     comboMax: 'Số khách tối đa',
+    comboMin: 'Số khách tối thiểu',
     comboNote: 'Đặt số khách tối đa cho các bàn ghép lại. Khi đặt trực tuyến với số khách vượt 1 bàn, hệ thống tự giữ nhiều bàn nếu các bàn ghép còn trống.',
     addCombo: 'Thêm ghép bàn',
 
