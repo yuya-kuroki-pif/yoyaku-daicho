@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=10">
+  <link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
   <!-- dinii風 細線SVGアイコン定義 -->
@@ -56,6 +56,14 @@
   <!-- 左サイドバー -->
   <aside class="rail" id="rail">
     <div class="rail-logo" data-i18n="appTitle"></div>
+    <button class="rail-btn active" data-view="timetable">
+      <span class="rail-ic"><svg class="ic"><use href="#ic-calendar"/></svg></span>
+      <span class="rail-label" data-i18n="timetable"></span>
+    </button>
+    <button class="rail-btn" data-view="list">
+      <span class="rail-ic"><svg class="ic"><use href="#ic-list"/></svg></span>
+      <span class="rail-label" data-i18n="list"></span>
+    </button>
     <button class="rail-btn" data-view="customers">
       <span class="rail-ic"><svg class="ic"><use href="#ic-users"/></svg></span>
       <span class="rail-label" data-i18n="customers"></span>
@@ -311,7 +319,7 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=10"></script>
-  <script src="app.js?v=10"></script>
+  <script src="i18n.js?v=11"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>
