@@ -4,9 +4,10 @@
 const I18N = {
   ja: {
     appTitle: '予約台帳',
-    timetable: 'タイムテーブル',
-    list: 'リスト',
+    timetable: 'タイムライン',
+    list: '予約一覧',
     customers: '顧客台帳',
+    seatMgmt: '席管理',
     newReservation: '新規予約',
     walkIn: 'ウォークイン',
     today: '今日',
@@ -52,7 +53,8 @@ const I18N = {
     groupsUnit: '組',
     noReservations: 'この日の予約はありません',
     noCustomers: '顧客データがありません',
-    unassigned: '未割当',
+    unassigned: '未配席',
+    firstVisit: '初回',
 
     quickSeat: '来店',
     quickFinish: '会計',
@@ -71,8 +73,10 @@ const I18N = {
     weekdays: ['日', '月', '火', '水', '木', '金', '土'],
     fmtDate(y, m, d, wd) { return `${y}年${m}月${d}日（${this.weekdays[wd]}）`; },
     fmtDateShort(y, m, d) { return `${m}/${d}`; },
-    fmtSummary(groups, guests) { return `${groups}${this.groupsUnit} / ${guests}${this.guestsUnit}`; },
+    fmtDateBox(y, m, d, wd) { return `${m}月${d}日(${this.weekdays[wd]})`; },
+    fmtSummary(groups, guests) { return `予約 ${groups}${this.groupsUnit} ${guests}人`; },
     fmtPax(n) { return `${n}${this.guestsUnit}`; },
+    fmtVisits(n) { return `${n}回`; },
   },
 
   vi: {
@@ -80,6 +84,7 @@ const I18N = {
     timetable: 'Lịch bàn',
     list: 'Danh sách',
     customers: 'Sổ khách hàng',
+    seatMgmt: 'Quản lý bàn',
     newReservation: 'Đặt bàn mới',
     walkIn: 'Khách vãng lai',
     today: 'Hôm nay',
@@ -126,6 +131,7 @@ const I18N = {
     noReservations: 'Chưa có đặt bàn cho ngày này',
     noCustomers: 'Chưa có dữ liệu khách hàng',
     unassigned: 'Chưa xếp bàn',
+    firstVisit: 'Lần đầu',
 
     quickSeat: 'Đã đến',
     quickFinish: 'Thanh toán',
@@ -144,7 +150,9 @@ const I18N = {
     weekdays: ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'],
     fmtDate(y, m, d, wd) { return `${this.weekdays[wd]}, ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`; },
     fmtDateShort(y, m, d) { return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}`; },
-    fmtSummary(groups, guests) { return `${groups} ${this.groupsUnit} / ${guests} ${this.guestsUnit}`; },
+    fmtDateBox(y, m, d, wd) { return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')} (${this.weekdays[wd]})`; },
+    fmtSummary(groups, guests) { return `Đặt ${groups} ${this.groupsUnit} ${guests} ${this.guestsUnit}`; },
     fmtPax(n) { return `${n} ${this.guestsUnit}`; },
+    fmtVisits(n) { return `${n} lần`; },
   },
 };

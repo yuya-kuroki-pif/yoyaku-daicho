@@ -5,62 +5,77 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="theme-color" content="#17384a">
+  <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-icon">🍽</span>
-      <span class="brand-name" data-i18n="appTitle"></span>
+  <!-- 左サイドバー（タブレット） -->
+  <aside class="rail">
+    <div class="rail-logo" data-i18n="appTitle"></div>
+    <button class="rail-btn active" data-railview="seat">
+      <span class="rail-ic">🗓</span><span class="rail-label" data-i18n="seatMgmt"></span>
+    </button>
+    <button class="rail-btn" data-railview="customers">
+      <span class="rail-ic">👥</span><span class="rail-label" data-i18n="customers"></span>
+    </button>
+    <button class="rail-btn" id="railSettings">
+      <span class="rail-ic">⚙</span><span class="rail-label" data-i18n="settings"></span>
+    </button>
+    <div class="spacer"></div>
+    <div class="lang-switch rail-lang" id="langSwitch">
+      <button data-lang="ja">日本語</button>
+      <button data-lang="vi">Tiếng Việt</button>
     </div>
+  </aside>
 
-    <nav class="view-switch" id="viewSwitch">
-      <button class="vs-btn active" data-view="timetable" data-i18n="timetable"></button>
-      <button class="vs-btn" data-view="list" data-i18n="list"></button>
-      <button class="vs-btn" data-view="customers" data-i18n="customers"></button>
-    </nav>
-
-    <div class="topbar-right">
-      <div class="lang-switch" id="langSwitch">
-        <button data-lang="ja">日本語</button>
-        <button data-lang="vi">Tiếng Việt</button>
+  <div class="app-main">
+    <header class="topbar">
+      <div class="date-nav">
+        <button id="btnPrevDay" class="nav-btn">‹</button>
+        <label class="date-box">
+          <span id="dateDisplay"></span>
+          <input type="date" id="datePicker">
+        </label>
+        <button id="btnNextDay" class="nav-btn">›</button>
+        <button id="btnToday" class="btn ghost small" data-i18n="today"></button>
       </div>
-      <button id="btnSettings" class="btn ghost" title="settings">⚙</button>
-      <button id="btnWalkIn" class="btn secondary hide-phone">🚶 <span data-i18n="walkIn"></span></button>
-      <button id="btnNew" class="btn primary hide-phone">＋ <span data-i18n="newReservation"></span></button>
-    </div>
-  </header>
 
-  <div class="datebar">
-    <div class="date-nav">
-      <button id="btnPrevDay" class="nav-btn">◀</button>
-      <button id="btnToday" class="btn ghost small" data-i18n="today"></button>
-      <input type="date" id="datePicker" class="date-input">
-      <button id="btnNextDay" class="nav-btn">▶</button>
-      <span class="date-display" id="dateDisplay"></span>
-    </div>
-    <div class="day-summary" id="daySummary"></div>
+      <nav class="view-switch" id="viewSwitch">
+        <button class="vs-btn active" data-view="timetable" data-i18n="timetable"></button>
+        <button class="vs-btn" data-view="list" data-i18n="list"></button>
+      </nav>
+
+      <div class="topbar-right">
+        <span class="day-summary" id="daySummary"></span>
+        <button id="btnSettings" class="icon-btn phone-only">⚙</button>
+        <div class="lang-switch phone-only" id="langSwitchPhone">
+          <button data-lang="ja">JA</button>
+          <button data-lang="vi">VI</button>
+        </div>
+        <button id="btnWalkIn" class="btn secondary hide-phone">🚶 <span data-i18n="walkIn"></span></button>
+        <button id="btnNew" class="btn primary hide-phone">＋ <span data-i18n="newReservation"></span></button>
+      </div>
+    </header>
+
+    <main>
+      <section id="view-timetable" class="view">
+        <div class="tt-scroll" id="ttScroll"></div>
+        <div class="legend" id="legend"></div>
+      </section>
+
+      <section id="view-list" class="view hidden">
+        <div class="list-wrap" id="listWrap"></div>
+      </section>
+
+      <section id="view-customers" class="view hidden">
+        <div class="cust-toolbar">
+          <input type="search" id="custSearch" class="search-input" data-i18n-placeholder="searchPlaceholder">
+        </div>
+        <div class="cust-wrap" id="custWrap"></div>
+      </section>
+    </main>
   </div>
-
-  <main>
-    <section id="view-timetable" class="view">
-      <div class="tt-scroll" id="ttScroll"></div>
-      <div class="legend" id="legend"></div>
-    </section>
-
-    <section id="view-list" class="view hidden">
-      <div class="list-wrap" id="listWrap"></div>
-    </section>
-
-    <section id="view-customers" class="view hidden">
-      <div class="cust-toolbar">
-        <input type="search" id="custSearch" class="search-input" data-i18n-placeholder="searchPlaceholder">
-      </div>
-      <div class="cust-wrap" id="custWrap"></div>
-    </section>
-  </main>
 
   <!-- スマホ用 下部ナビ / FAB -->
   <nav class="bottom-nav" id="bottomNav">
@@ -189,7 +204,7 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="i18n.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

@@ -73,6 +73,7 @@ function defaultState() {
     { id: uid(), date: today, start: 18 * 60, duration: 120, adults: 4, children: 0, name: '佐藤', kana: 'サトウ', phone: '090-3333-4444', tableIds: ['t2'], course: '飲み放題', memo: '窓際希望', status: 'reserved', walkIn: false },
     { id: uid(), date: today, start: 18 * 60 + 30, duration: 120, adults: 5, children: 1, name: 'Nguyễn Văn An', kana: '', phone: '070-5555-6666', tableIds: ['t7'], course: '', memo: 'Sinh nhật / 誕生日', status: 'reserved', walkIn: false },
     { id: uid(), date: today, start: 19 * 60, duration: 90, adults: 2, children: 0, name: '山本', kana: 'ヤマモト', phone: '', tableIds: ['t5'], course: '', memo: '', status: 'reserved', walkIn: false },
+    { id: uid(), date: today, start: 21 * 60, duration: 90, adults: 4, children: 0, name: 'あいだ はなこ', kana: 'アイダ ハナコ', phone: '080-7777-8888', tableIds: [], course: '', memo: '', status: 'reserved', walkIn: false },
   ];
   return {
     tables,
@@ -106,7 +107,7 @@ function applyStaticI18n() {
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
   document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => { el.placeholder = t(el.dataset.i18nPlaceholder); });
   document.documentElement.lang = state.settings.lang;
-  document.querySelectorAll('#langSwitch button').forEach((b) => {
+  document.querySelectorAll('.lang-switch button').forEach((b) => {
     b.classList.toggle('active', b.dataset.lang === state.settings.lang);
   });
 }
@@ -118,12 +119,36 @@ function statusLabel(s) {
 function renderDateBar() {
   const [y, m, d] = currentDate.split('-').map(Number);
   const wd = new Date(y, m - 1, d).getDay();
-  document.getElementById('dateDisplay').textContent = dict().fmtDate(y, m, d, wd);
+  document.getElementById('dateDisplay').textContent = dict().fmtDateBox(y, m, d, wd);
   document.getElementById('datePicker').value = currentDate;
 
   const list = dayReservations(currentDate).filter((r) => r.status !== 'cancelled' && r.status !== 'noshow');
   const guests = list.reduce((sum, r) => sum + (r.adults || 0) + (r.children || 0), 0);
   document.getElementById('daySummary').textContent = dict().fmtSummary(list.length, guests);
+}
+
+/* ---------- 来店回数（dinii風「n回」チップ用） ---------- */
+function custKey(r) { return r.phone ? 'p:' + r.phone : (r.name ? 'n:' + r.name : ''); }
+function buildVisitMap() {
+  const map = new Map();
+  state.reservations.forEach((r) => {
+    const key = custKey(r);
+    if (!key) return;
+    if (r.status === 'seated' || r.status === 'finished') {
+      map.set(key, (map.get(key) || 0) + 1);
+    }
+  });
+  return map;
+}
+/* ブロック/カード内の名前行（名前・人数・来店回数チップ・コースアイコン） */
+function blockNameHtml(r, visitMap) {
+  const pax = (r.adults || 0) + (r.children || 0);
+  const visits = visitMap.get(custKey(r)) || 0;
+  const chip = visits > 0
+    ? `<span class="chip-visit">${esc(dict().fmtVisits(visits))}</span>`
+    : `<span class="chip-visit">${esc(t('firstVisit'))}</span>`;
+  const courseIco = r.course ? '<span class="b-ico">🍴</span>' : '';
+  return `${esc(r.name)} <span>${esc(dict().fmtPax(pax))}</span> ${chip}${courseIco}`;
 }
 
 /* ---------- timetable view ---------- */
@@ -162,7 +187,72 @@ function renderTimetable() {
   grid.appendChild(head);
 
   const resList = dayReservations(currentDate);
+  const visitMap = buildVisitMap();
   const rows = [];
+
+  // 予約ブロック生成（fromTableId: null = 未配席行）
+  const makeBlock = (r, fromTableId) => {
+    const start = Math.max(r.start, openMin);
+    const end = Math.min(r.start + r.duration, closeMin);
+    if (end <= openMin || start >= closeMin) return null;
+    const block = document.createElement('div');
+    let cls = 'tt-block ' + r.status;
+    if (r.status === 'reserved' && r.course) cls += ' course';
+    if (fromTableId === null) cls += ' unassigned';
+    block.className = cls;
+    block.dataset.resId = r.id;
+    block.style.left = ((start - openMin) / SLOT_MIN) * m.slotW + 1 + 'px';
+    block.style.width = ((end - start) / SLOT_MIN) * m.slotW - 3 + 'px';
+    const info = r.memo ? esc(r.memo) : `${fmtTime(r.start)}-${fmtTime(r.start + r.duration)}`;
+    block.innerHTML =
+      `<div class="b-name">${blockNameHtml(r, visitMap)}</div>` +
+      `<div class="b-info">${info}</div>`;
+
+    // 右端: 滞在時間変更ハンドル
+    const rh = document.createElement('div');
+    rh.className = 'b-resize';
+    rh.addEventListener('pointerdown', (e) => onResizePointerDown(e, r.id, fromTableId));
+    block.appendChild(rh);
+
+    // 長押し（PCはドラッグ）で移動、タップで編集
+    block.addEventListener('pointerdown', (e) => onBlockPointerDown(e, r.id, fromTableId));
+    block.addEventListener('click', (e) => e.stopPropagation());
+    return block;
+  };
+
+  // 空きマスタップ → 新規予約（tableId: null = テーブル未選択）
+  const attachRowTap = (row, tableId) => {
+    row.addEventListener('click', (e) => {
+      if (suppressClick) { suppressClick = false; return; }
+      if (e.target.closest('.tt-block')) return;
+      const rect = row.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const min = openMin + Math.floor(x / m.slotW) * SLOT_MIN;
+      openResModal(null, { start: min, tableId });
+    });
+  };
+
+  // 未配席行（dinii風: テーブル未割当の予約を上段に表示、ドラッグで配席）
+  const uaList = resList.filter((r) => !(r.tableIds || []).length && r.status !== 'cancelled' && r.status !== 'noshow');
+  {
+    const line = document.createElement('div');
+    line.className = 'tt-line unassigned-line';
+    const label = document.createElement('div');
+    label.className = 'tt-label';
+    label.innerHTML = `<span class="tname">${esc(t('unassigned'))}<span class="ua-badge">${uaList.length}</span></span>`;
+    line.appendChild(label);
+    const row = document.createElement('div');
+    row.className = 'tt-row unassigned-row';
+    row.style.width = rowW + 'px';
+    uaList.forEach((r) => {
+      const block = makeBlock(r, null);
+      if (block) row.appendChild(block);
+    });
+    attachRowTap(row, null);
+    line.appendChild(row);
+    grid.appendChild(line);
+    rows.push({ tableId: null, lineEl: line, rowEl: row });
+  }
 
   state.tables.forEach((tb) => {
     const line = document.createElement('div');
@@ -185,41 +275,11 @@ function renderTimetable() {
     resList
       .filter((r) => (r.tableIds || []).includes(tb.id) && r.status !== 'cancelled')
       .forEach((r) => {
-        const start = Math.max(r.start, openMin);
-        const end = Math.min(r.start + r.duration, closeMin);
-        if (end <= openMin || start >= closeMin) return;
-        const block = document.createElement('div');
-        block.className = 'tt-block ' + r.status;
-        block.dataset.resId = r.id;
-        block.style.left = ((start - openMin) / SLOT_MIN) * m.slotW + 1 + 'px';
-        block.style.width = ((end - start) / SLOT_MIN) * m.slotW - 3 + 'px';
-        const pax = (r.adults || 0) + (r.children || 0);
-        block.innerHTML =
-          `<div class="b-name">${esc(r.name)}</div>` +
-          `<div class="b-info">${esc(dict().fmtPax(pax))} ${fmtTime(r.start)}-${fmtTime(r.start + r.duration)}</div>`;
-
-        // 右端: 滞在時間変更ハンドル
-        const rh = document.createElement('div');
-        rh.className = 'b-resize';
-        rh.addEventListener('pointerdown', (e) => onResizePointerDown(e, r.id, tb.id));
-        block.appendChild(rh);
-
-        // 長押し（PCはドラッグ）で移動、タップで編集
-        block.addEventListener('pointerdown', (e) => onBlockPointerDown(e, r.id, tb.id));
-        block.addEventListener('click', (e) => e.stopPropagation());
-        row.appendChild(block);
+        const block = makeBlock(r, tb.id);
+        if (block) row.appendChild(block);
       });
 
-    // 空きマスをタップ → その時間・テーブルで新規予約
-    row.addEventListener('click', (e) => {
-      if (suppressClick) { suppressClick = false; return; }
-      if (e.target.closest('.tt-block')) return;
-      const rect = row.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const min = openMin + Math.floor(x / m.slotW) * SLOT_MIN;
-      openResModal(null, { start: min, tableId: tb.id });
-    });
-
+    attachRowTap(row, tb.id);
     line.appendChild(row);
     grid.appendChild(line);
     rows.push({ tableId: tb.id, lineEl: line, rowEl: row });
@@ -243,10 +303,17 @@ function renderTimetable() {
 }
 
 function renderLegend() {
-  const colors = { reserved: 'var(--reserved)', seated: 'var(--seated)', finished: 'var(--finished)', noshow: 'var(--noshow)', cancelled: 'var(--cancelled)' };
+  const items = [
+    { color: '#fff', label: statusLabel('reserved') },
+    { color: 'var(--green-bg)', label: `${statusLabel('reserved')}(${t('course')})` },
+    { color: 'var(--slate)', label: statusLabel('seated') },
+    { color: 'var(--gray-block)', label: statusLabel('finished') },
+    { color: 'var(--red)', label: statusLabel('noshow') },
+    { color: 'var(--pink-bg)', label: t('unassigned') },
+  ];
   document.getElementById('legend').innerHTML =
-    STATUSES.map((s) =>
-      `<span class="lg"><span class="sw" style="background:${colors[s]}"></span>${esc(statusLabel(s))}</span>`
+    items.map((it) =>
+      `<span class="lg"><span class="sw" style="background:${it.color}"></span>${esc(it.label)}</span>`
     ).join('') +
     `<span class="hint">${esc(t('dragHint'))}</span>`;
 }
@@ -402,7 +469,11 @@ function onDragUp() {
   const r = d.r;
   if (d.mode === 'move') {
     if (d.newStart === r.start && d.newTableId === d.fromTableId) { renderTimetable(); return; }
-    const newTableIds = [...new Set(r.tableIds.map((id) => (id === d.fromTableId ? d.newTableId : id)))];
+    // 配席の更新: 未配席行へ→割当解除 / 未配席から→配席 / テーブル間→付け替え
+    let newTableIds;
+    if (d.newTableId === null) newTableIds = [];
+    else if (d.fromTableId === null) newTableIds = [d.newTableId];
+    else newTableIds = [...new Set((r.tableIds || []).map((id) => (id === d.fromTableId ? d.newTableId : id)))];
     const updated = { ...r, start: d.newStart, tableIds: newTableIds };
     if (hasConflict(updated) && !confirm(t('conflictWarn'))) { renderTimetable(); return; }
     Object.assign(r, updated);
@@ -439,17 +510,19 @@ function renderList() {
     return;
   }
   wrap.innerHTML = '';
+  const visitMap = buildVisitMap();
   list.forEach((r) => {
-    const pax = (r.adults || 0) + (r.children || 0);
     const card = document.createElement('div');
-    card.className = 'res-card ' + r.status;
+    let cls = 'res-card ' + r.status;
+    if (r.status === 'reserved' && r.course) cls += ' course';
+    card.className = cls;
     let quick = '';
     if (r.status === 'reserved') quick = `<button class="btn small primary" data-quick="seated">${esc(t('quickSeat'))}</button>`;
-    else if (r.status === 'seated') quick = `<button class="btn small secondary" style="border:1px solid var(--line)" data-quick="finished">${esc(t('quickFinish'))}</button>`;
+    else if (r.status === 'seated') quick = `<button class="btn small secondary" data-quick="finished">${esc(t('quickFinish'))}</button>`;
     card.innerHTML =
       `<div class="rc-time">${fmtTime(r.start)}<small>${fmtTime(r.start + r.duration)}</small></div>` +
       `<div class="rc-main">` +
-        `<div class="rc-name">${esc(r.name)}　${esc(dict().fmtPax(pax))}</div>` +
+        `<div class="rc-name">${blockNameHtml(r, visitMap)}</div>` +
         `<div class="rc-sub">${esc(tableNames(r.tableIds))}${r.phone ? '　📞 ' + esc(r.phone) : ''}${r.course ? '　🍴 ' + esc(r.course) : ''}${r.memo ? '　📝 ' + esc(r.memo) : ''}</div>` +
       `</div>` +
       `<div class="rc-actions">${quick}<span class="status-chip ${r.status}">${esc(statusLabel(r.status))}</span></div>`;
@@ -729,6 +802,11 @@ function setView(v) {
   document.querySelectorAll('#viewSwitch .vs-btn, #bottomNav .bn-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.view === v);
   });
+  // サイドバー: タイムライン/予約一覧は「席管理」に属する
+  document.querySelectorAll('.rail-btn[data-railview]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.railview === (v === 'customers' ? 'customers' : 'seat'));
+  });
+  document.getElementById('viewSwitch').classList.toggle('hidden', v === 'customers');
   document.getElementById('view-timetable').classList.toggle('hidden', v !== 'timetable');
   document.getElementById('view-list').classList.toggle('hidden', v !== 'list');
   document.getElementById('view-customers').classList.toggle('hidden', v !== 'customers');
@@ -761,13 +839,23 @@ function init() {
   document.getElementById('viewSwitch').addEventListener('click', onNavClick);
   document.getElementById('bottomNav').addEventListener('click', onNavClick);
 
-  document.getElementById('langSwitch').addEventListener('click', (e) => {
+  // サイドバー
+  document.querySelectorAll('.rail-btn[data-railview]').forEach((b) => {
+    b.addEventListener('click', () => {
+      setView(b.dataset.railview === 'customers' ? 'customers' : 'timetable');
+    });
+  });
+  document.getElementById('railSettings').addEventListener('click', openSettingsModal);
+
+  const onLangClick = (e) => {
     const btn = e.target.closest('button[data-lang]');
     if (!btn) return;
     state.settings.lang = btn.dataset.lang;
     save();
     renderAll();
-  });
+  };
+  document.getElementById('langSwitch').addEventListener('click', onLangClick);
+  document.getElementById('langSwitchPhone').addEventListener('click', onLangClick);
 
   document.getElementById('btnPrevDay').addEventListener('click', () => shiftDate(-1));
   document.getElementById('btnNextDay').addEventListener('click', () => shiftDate(1));
