@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=16">
+  <link rel="stylesheet" href="style.css?v=17">
 </head>
 <body>
   <!-- dinii風 細線SVGアイコン定義 -->
@@ -45,6 +45,9 @@
       <line x1="2" y1="12" x2="22" y2="12"/>
       <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
     </symbol>
+    <symbol id="ic-chat" viewBox="0 0 24 24">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    </symbol>
     <symbol id="ic-walkin" viewBox="0 0 24 24">
       <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
       <circle cx="8.5" cy="7" r="4"/>
@@ -68,6 +71,10 @@
       <span class="rail-ic"><svg class="ic"><use href="#ic-globe"/></svg></span>
       <span class="rail-label" data-i18n="sites"></span>
     </button>
+    <button class="rail-btn" data-view="chat">
+      <span class="rail-ic"><svg class="ic"><use href="#ic-chat"/></svg></span>
+      <span class="rail-label" data-i18n="chat"></span>
+    </button>
     <div class="spacer"></div>
   </aside>
 
@@ -90,6 +97,7 @@
 
       <div class="topbar-right">
         <span class="day-summary" id="daySummary"></span>
+        <button id="btnChatPhone" class="icon-btn phone-only"><svg class="ic"><use href="#ic-chat"/></svg></button>
         <button id="btnSitesPhone" class="icon-btn phone-only"><svg class="ic"><use href="#ic-globe"/></svg></button>
         <button id="btnSettings" class="icon-btn phone-only"><svg class="ic"><use href="#ic-gear"/></svg></button>
         <div class="lang-switch" id="langSwitch">
@@ -124,6 +132,14 @@
           <h3 class="inv-heading" data-i18n="invHeading"></h3>
           <p class="inv-note" data-i18n="invNote"></p>
           <div class="inv-scroll" id="invGrid"></div>
+        </div>
+      </section>
+
+      <section id="view-chat" class="view hidden">
+        <div class="chat-log" id="chatLog"></div>
+        <div class="chat-inputbar">
+          <input type="text" id="chatInput" data-i18n-placeholder="chatPlaceholder" autocomplete="off">
+          <button class="btn primary" id="chatSend" data-i18n="chatSend"></button>
         </div>
       </section>
     </main>
@@ -257,6 +273,7 @@
         </div>
         <div class="tbl-head">
           <span data-i18n="tableName"></span>
+          <span data-i18n="groupLabel"></span>
           <span data-i18n="seatsLabel"></span>
           <span></span>
         </div>
@@ -303,7 +320,7 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=16"></script>
-  <script src="app.js?v=16"></script>
+  <script src="i18n.js?v=17"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>

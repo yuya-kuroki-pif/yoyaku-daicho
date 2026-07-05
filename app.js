@@ -60,13 +60,13 @@ function ttMetrics() {
 /* ---------- state ---------- */
 function defaultState() {
   const tables = [
-    { id: 't1', name: 'T1', seats: 4 },
-    { id: 't2', name: 'T2', seats: 4 },
-    { id: 't3', name: 'T3', seats: 4 },
-    { id: 't4', name: 'T4', seats: 6 },
-    { id: 't5', name: 'C1', seats: 2 },
-    { id: 't6', name: 'C2', seats: 2 },
-    { id: 't7', name: 'VIP', seats: 8 },
+    { id: 't1', name: 'T1', seats: 4, group: 'ホール' },
+    { id: 't2', name: 'T2', seats: 4, group: 'ホール' },
+    { id: 't3', name: 'T3', seats: 4, group: 'ホール' },
+    { id: 't4', name: 'T4', seats: 6, group: 'ホール' },
+    { id: 't5', name: 'C1', seats: 2, group: 'カウンター' },
+    { id: 't6', name: 'C2', seats: 2, group: 'カウンター' },
+    { id: 't7', name: 'VIP', seats: 8, group: '個室' },
   ];
   const today = todayStr();
   const reservations = [
@@ -116,6 +116,13 @@ function load() {
           state.sites.push({ id: uid(), name: 'Googleマップ', color: '#16a34a', enabled: true, tableIds: state.tables.slice(0, 3).map((tb) => tb.id) });
         }
         state.sitesV2 = true;
+        save();
+      }
+      if (!state.tablesV2) {
+        // 既定テーブルへ初期グループを付与
+        const defs = { t1: 'ホール', t2: 'ホール', t3: 'ホール', t4: 'ホール', t5: 'カウンター', t6: 'カウンター', t7: '個室' };
+        state.tables.forEach((tb) => { if (tb.group === undefined) tb.group = defs[tb.id] || ''; });
+        state.tablesV2 = true;
         save();
       }
       return;
@@ -300,7 +307,20 @@ function renderTimetable() {
     rows.push({ tableId: null, lineEl: line, rowEl: row });
   }
 
+  let prevGroup = null;
   state.tables.forEach((tb) => {
+    // グループ見出し行
+    const g = (tb.group || '').trim();
+    if (g && g !== prevGroup) {
+      const gline = document.createElement('div');
+      gline.className = 'tt-line group-line';
+      gline.innerHTML =
+        `<div class="tt-label"><span class="tname">${esc(g)}</span></div>` +
+        `<div class="tt-grouprow" style="width:${rowW}px"></div>`;
+      grid.appendChild(gline);
+    }
+    prevGroup = g;
+
     const line = document.createElement('div');
     line.className = 'tt-line';
 
@@ -451,11 +471,7 @@ function updateDragFromPointer() {
     startMin = Math.round(startMin / SNAP_MIN) * SNAP_MIN;
     drag.newStart = clamp(startMin, ttCtx.openMin, Math.max(ttCtx.openMin, ttCtx.closeMin - drag.r.duration));
 
-    let idx = ttCtx.rows.findIndex((row) => {
-      const top = row.lineEl.offsetTop;
-      return y >= top && y < top + row.lineEl.offsetHeight;
-    });
-    if (idx < 0) idx = y < ttCtx.rows[0].lineEl.offsetTop ? 0 : ttCtx.rows.length - 1;
+    const idx = rowIdxAtClientY(drag.lastY);
     drag.newTableId = ttCtx.rows[idx].tableId;
     ttCtx.rows.forEach((row, i) => row.rowEl.classList.toggle('drop-target', i === idx));
   } else {
@@ -717,14 +733,19 @@ function timeAtClientX(clientX) {
   return ttCtx.openMin + ((clientX - gr.left - m.labelW) / m.slotW) * SLOT_MIN;
 }
 function rowIdxAtClientY(clientY) {
+  // グループ見出し行の上でも最も近いテーブル行を返す
   const gr = ttCtx.grid.getBoundingClientRect();
   const y = clientY - gr.top;
-  let idx = ttCtx.rows.findIndex((row) => {
-    const top = row.lineEl.offsetTop;
-    return y >= top && y < top + row.lineEl.offsetHeight;
-  });
-  if (idx < 0) idx = y < ttCtx.rows[0].lineEl.offsetTop ? 0 : ttCtx.rows.length - 1;
-  return idx;
+  let best = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < ttCtx.rows.length; i++) {
+    const top = ttCtx.rows[i].lineEl.offsetTop;
+    const h = ttCtx.rows[i].lineEl.offsetHeight;
+    if (y >= top && y < top + h) return i;
+    const d = y < top ? top - y : y - (top + h);
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  return best;
 }
 
 function onRowPointerDown(e, tableId) {
@@ -846,11 +867,11 @@ function onCpPax(n) {
 }
 
 /* 予約ブロック: 選択した席×時間枠をネット予約の在庫から外す */
-function createBlock(start, tableIds, duration) {
+function createBlock(start, tableIds, duration, date) {
   if (!tableIds.length) return;
   state.reservations.push({
     id: uid(),
-    date: currentDate,
+    date: date || currentDate,
     start,
     duration: duration || 120,
     adults: 0,
@@ -876,10 +897,10 @@ function closeCellPopover() {
 }
 
 /* ウォークインをその場で即時登録（来店中） */
-function createWalkIn(start, tableIds, pax, duration) {
+function createWalkIn(start, tableIds, pax, duration, date) {
   const res = {
     id: uid(),
-    date: currentDate,
+    date: date || currentDate,
     start,
     duration: duration || 120,
     adults: pax,
@@ -1288,6 +1309,7 @@ function addTableRow(tb) {
   row.dataset.id = tb ? tb.id : '';
   row.innerHTML =
     `<input type="text" class="tr-name" value="${esc(tb ? tb.name : '')}">` +
+    `<input type="text" class="tr-group" placeholder="${esc(t('groupPlaceholder'))}" value="${esc(tb ? (tb.group || '') : '')}">` +
     `<input type="number" class="tr-seats" min="1" max="99" value="${tb ? tb.seats : 4}">` +
     `<button type="button" class="icon-btn tr-del">🗑</button>`;
   row.querySelector('.tr-del').addEventListener('click', () => row.remove());
@@ -1306,12 +1328,242 @@ function saveSettings() {
     const name = row.querySelector('.tr-name').value.trim();
     if (!name) return;
     const seats = Math.max(1, Number(row.querySelector('.tr-seats').value) || 1);
-    tables.push({ id: row.dataset.id || uid(), name, seats });
+    const group = row.querySelector('.tr-group').value.trim();
+    tables.push({ id: row.dataset.id || uid(), name, seats, group });
   });
   if (tables.length) state.tables = tables;
   save();
   document.getElementById('settingsModal').classList.add('hidden');
   renderAll();
+}
+
+/* ---------- チャット操作（ルールベースの日本語/ベトナム語コマンド解析） ---------- */
+function chatAppend(role, text) {
+  const log = document.getElementById('chatLog');
+  const div = document.createElement('div');
+  div.className = 'chat-msg ' + role;
+  div.textContent = text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function chatOffsetDate(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function chatFindRes(name, date) {
+  const key = name.toLowerCase();
+  return state.reservations.find((r) =>
+    r.date === date && r.status !== 'cancelled' && r.status !== 'block' &&
+    r.name.toLowerCase().includes(key));
+}
+
+function chatSummary(date, start, dur, tableIds, name, pax) {
+  const [y, m, d] = date.split('-').map(Number);
+  const wd = new Date(y, m - 1, d).getDay();
+  const parts = [dict().fmtDateBox(y, m, d, wd), `${fmtTime(start)}〜${fmtTime(start + dur)}`];
+  if (tableIds && tableIds.length) parts.push(tableNames(tableIds));
+  if (name) parts.push(name);
+  if (pax) parts.push(dict().fmtPax(pax));
+  return parts.join('　');
+}
+
+function chatExecute(text) {
+  const lower = text.toLowerCase();
+  const { openMin, closeMin } = state.settings;
+
+  if (/ヘルプ|使い方|help|hướng dẫn/.test(lower)) return t('chatHello') + '\n' + t('chatExamples');
+
+  // 日付
+  let date = currentDate;
+  const md = text.match(/(\d{1,2})月(\d{1,2})日/);
+  if (/明後日|ngày kia/.test(lower)) date = chatOffsetDate(2);
+  else if (/明日|ngày mai/.test(lower)) date = chatOffsetDate(1);
+  else if (/今日|hôm nay/.test(lower)) date = todayStr();
+  else if (md) date = `${new Date().getFullYear()}-${pad2(+md[1])}-${pad2(+md[2])}`;
+
+  // 時間（19時 / 19時半 / 19:30 / 19h30）
+  let start = null;
+  const tm = text.match(/(\d{1,2})\s*[:時h]\s*(\d{2})?(半)?/);
+  if (tm) start = clamp((+tm[1]) * 60 + (tm[2] ? +tm[2] : 0) + (tm[3] ? 30 : 0), 0, 24 * 60);
+
+  // 滞在時間（2時間 / 2 giờ / 1.5時間）
+  let dur = null;
+  const dm = text.match(/(\d+(?:\.\d+)?)\s*(時間|giờ)/);
+  if (dm) dur = Math.round(parseFloat(dm[1]) * 60);
+
+  // 人数（4名 / 4人 / 4 khách）
+  let pax = null;
+  const pm = text.match(/(\d+)\s*(名様?|人|khách)/);
+  if (pm) pax = +pm[1];
+
+  // テーブル（登録名と一致、長い名前を優先）
+  const tables = [...state.tables]
+    .sort((a, b) => b.name.length - a.name.length)
+    .filter((tb) => {
+      const re = new RegExp(tb.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + (/\d$/.test(tb.name) ? '(?!\\d)' : ''), 'i');
+      return re.test(text);
+    });
+  const tableIds = tables.map((tb) => tb.id);
+
+  // 名前（〇〇様/さん、または「tên 〜」）
+  let name = null;
+  const nm = text.match(/([^\s、。,]+?)(様|さま|さん)/);
+  if (nm) name = nm[1];
+  else {
+    const tn = text.match(/tên\s+([^\s,、。]+(?:\s[^\s,、。]+)?)/i);
+    if (tn) name = tn[1];
+  }
+
+  // 営業時間: 「営業時間を17時から23時に」
+  const bh = text.match(/営業時間.*?(\d{1,2})\s*時.*?(\d{1,2})\s*時/);
+  if (bh) {
+    const o = (+bh[1]) * 60, c = (+bh[2]) * 60;
+    if (c > o) {
+      state.settings.openMin = o;
+      state.settings.closeMin = c;
+      save();
+      return `✅ ${fmtTime(o)}〜${fmtTime(c)} — ${t('chatUpdated')}`;
+    }
+  }
+
+  // テーブル追加: 「テーブルT9を4席で追加」
+  if (/追加|thêm/.test(lower) && /テーブル|bàn/.test(lower)) {
+    const an = text.match(/テーブル\s*([^\s、。を]+)/) || text.match(/bàn\s+(\S+)/i);
+    const as = text.match(/(\d+)\s*(席|ghế)/);
+    if (an) {
+      state.tables.push({ id: uid(), name: an[1], seats: as ? +as[1] : 4, group: '' });
+      save();
+      return `✅ ${an[1]} (${as ? +as[1] : 4}${t('seatsUnit')}) — ${t('chatDone')}`;
+    }
+    return t('chatNeedTable');
+  }
+
+  // グループ設定: 「T1をホールグループに」
+  const gm = text.match(/を(.+?)グループ/) || text.match(/nhóm\s+([^\s,、。]+)/i);
+  if (gm && tableIds.length && /グループ|nhóm/.test(lower)) {
+    tables.forEach((tb) => { tb.group = gm[1].trim(); });
+    save();
+    return `✅ ${tables.map((tb) => tb.name).join(', ')} → ${gm[1].trim()} — ${t('chatUpdated')}`;
+  }
+
+  // 席数変更: 「T1を6席に変更」
+  const scm = text.match(/(\d+)\s*(席|ghế)/);
+  if (scm && tableIds.length && /(席|ghế)\s*(に|へ|đổi)|変更/.test(text) && !/追加|thêm/.test(lower)) {
+    tables.forEach((tb) => { tb.seats = +scm[1]; });
+    save();
+    return `✅ ${tables.map((tb) => tb.name).join(', ')} → ${scm[1]}${t('seatsUnit')} — ${t('chatUpdated')}`;
+  }
+
+  // テーブル削除: 「T9を削除」
+  if (/(削除|xóa)/.test(lower) && tableIds.length) {
+    state.tables = state.tables.filter((tb) => !tableIds.includes(tb.id));
+    state.sites.forEach((s) => { s.tableIds = s.tableIds.filter((id) => !tableIds.includes(id)); });
+    save();
+    return `✅ ${tables.map((tb) => tb.name).join(', ')} — ${t('chatDeleted')}`;
+  }
+
+  // ブロック解除: 「T2のブロック解除」
+  if (/(ブロック|chặn)/.test(lower) && /(解除|bỏ)/.test(lower)) {
+    const before = state.reservations.length;
+    state.reservations = state.reservations.filter((r) =>
+      !(r.status === 'block' && r.date === date &&
+        (!tableIds.length || r.tableIds.some((id) => tableIds.includes(id)))));
+    if (state.reservations.length === before) return t('chatNotFound');
+    save();
+    return `✅ ${t('chatUnblocked')}`;
+  }
+
+  // ブロック: 「T2を19時から2時間ブロック」
+  if (/ブロック|chặn/.test(lower)) {
+    if (!tableIds.length) return t('chatNeedTable');
+    if (start == null) return t('chatNeedTime');
+    createBlock(start, tableIds, dur || 120, date);
+    return `✅ ${chatSummary(date, start, dur || 120, tableIds)} — ${t('chatBlocked')}`;
+  }
+
+  // ウォークイン: 「ウォークイン 2名 C1」
+  if (/ウォークイン|walk|vãng lai/.test(lower)) {
+    const s2 = start ?? clamp(defaultStart(), openMin, closeMin - 30);
+    createWalkIn(s2, tableIds, pax || 2, dur || 120, date);
+    return `✅ ${chatSummary(date, s2, dur || 120, tableIds, t('walkInName'), pax || 2)} — ${t('chatDone')}`;
+  }
+
+  // キャンセル: 「田中様の予約をキャンセル」
+  if (/キャンセル|hủy/.test(lower)) {
+    if (!name) return t('chatNeedName');
+    const r = chatFindRes(name, date);
+    if (!r) return t('chatNotFound');
+    r.status = 'cancelled';
+    save();
+    renderAll();
+    return `✅ ${chatSummary(r.date, r.start, r.duration, r.tableIds, r.name)} — ${t('chatCancelled')}`;
+  }
+
+  // 来店 / 会計
+  if (name && /来店|đã đến/.test(text)) {
+    const r = chatFindRes(name, date);
+    if (!r) return t('chatNotFound');
+    r.status = 'seated';
+    save();
+    renderAll();
+    return `✅ ${r.name} — ${statusLabel('seated')}`;
+  }
+  if (name && /会計|退店|thanh toán/.test(lower)) {
+    const r = chatFindRes(name, date);
+    if (!r) return t('chatNotFound');
+    r.status = 'finished';
+    save();
+    renderAll();
+    return `✅ ${r.name} — ${statusLabel('finished')}`;
+  }
+
+  // 予約（既定）: 「明日19時 田中様 4名 T3で予約」
+  if (/予約|đặt/.test(lower) || (start != null && (pax != null || name))) {
+    if (start == null) return t('chatNeedTime');
+    if (!name) return t('chatNeedName');
+    const res = {
+      id: uid(),
+      date,
+      start: clamp(start, openMin, closeMin - 30),
+      duration: dur || 120,
+      adults: pax || 2,
+      children: 0,
+      name,
+      kana: '',
+      phone: '',
+      tableIds,
+      course: '',
+      memo: '',
+      status: 'reserved',
+      walkIn: false,
+      channel: '',
+    };
+    const conflict = res.tableIds.length && hasConflict(res);
+    state.reservations.push(res);
+    save();
+    renderAll();
+    return `✅ ${chatSummary(res.date, res.start, res.duration, res.tableIds, res.name, res.adults)} — ${t('chatDone')}${conflict ? '\n' + t('chatConflict') : ''}`;
+  }
+
+  return t('chatUnknown') + '\n' + t('chatExamples');
+}
+
+function chatSubmit() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  chatAppend('user', text);
+  let reply;
+  try {
+    reply = chatExecute(text);
+  } catch (e) {
+    reply = t('chatUnknown') + '\n' + t('chatExamples');
+  }
+  chatAppend('bot', reply);
 }
 
 /* ---------- view switching / render ---------- */
@@ -1324,6 +1576,10 @@ function setView(v) {
   document.getElementById('view-list').classList.toggle('hidden', v !== 'list');
   document.getElementById('view-customers').classList.toggle('hidden', v !== 'customers');
   document.getElementById('view-sites').classList.toggle('hidden', v !== 'sites');
+  document.getElementById('view-chat').classList.toggle('hidden', v !== 'chat');
+  if (v === 'chat' && !document.getElementById('chatLog').childElementCount) {
+    chatAppend('bot', t('chatHello') + '\n' + t('chatExamples'));
+  }
   renderAll();
 }
 
@@ -1334,7 +1590,8 @@ function renderAll() {
   if (view === 'timetable') renderTimetable();
   else if (view === 'list') renderList();
   else if (view === 'sites') renderSites();
-  else renderCustomers();
+  else if (view === 'customers') renderCustomers();
+  /* chat はDOMを保持するため再描画しない */
 }
 
 function shiftDate(days) {
@@ -1400,6 +1657,13 @@ function init() {
       const el = document.getElementById(b.dataset.step === 'adults' ? 'fAdults' : 'fChildren');
       el.textContent = Math.max(0, Number(el.textContent) + Number(b.dataset.d));
     });
+  });
+
+  // チャット操作
+  document.getElementById('btnChatPhone').addEventListener('click', () => setView('chat'));
+  document.getElementById('chatSend').addEventListener('click', chatSubmit);
+  document.getElementById('chatInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) chatSubmit();
   });
 
   // 予約サイト設定
