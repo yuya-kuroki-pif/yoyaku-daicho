@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=11">
+  <link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
   <!-- dinii風 細線SVGアイコン定義 -->
@@ -126,15 +126,7 @@
 
       <section id="view-sites" class="view hidden">
         <div class="sites-wrap">
-          <div class="own-panel">
-            <div class="own-title"><svg class="ic"><use href="#ic-globe"/></svg> <span data-i18n="ownSiteTitle"></span></div>
-            <div class="own-url"><code id="ownUrl"></code></div>
-            <div class="own-actions">
-              <button class="btn primary small" id="btnCopyUrl" data-i18n="copyUrl"></button>
-              <button class="btn ghost small" id="btnOpenSite" data-i18n="openSite"></button>
-            </div>
-            <p class="own-note" data-i18n="ownNote"></p>
-          </div>
+          <p class="sites-note" data-i18n="sitesNote"></p>
           <div class="site-cards" id="siteCards"></div>
           <button class="btn ghost" id="btnAddSite"><svg class="ic"><use href="#ic-plus"/></svg> <span data-i18n="addSite"></span></button>
           <h3 class="inv-heading" data-i18n="invHeading"></h3>
@@ -319,7 +311,7 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=11"></script>
-  <script src="app.js?v=11"></script>
+  <script src="i18n.js?v=12"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

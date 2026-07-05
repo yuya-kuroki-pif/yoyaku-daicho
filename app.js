@@ -80,15 +80,15 @@ function defaultState() {
     tables,
     reservations,
     sites: defaultSites(),
+    sitesV2: true,
     settings: { lang: 'ja', openMin: 11 * 60, closeMin: 23 * 60 },
   };
 }
 function defaultSites() {
   return [
-    { id: 's4', name: '自社サイト', color: '#0ea5e9', enabled: true, own: true, tableIds: ['t1', 't4', 't7'] },
-    { id: 's1', name: '食べログ', color: '#f59e0b', enabled: true, tableIds: ['t1', 't2', 't3'] },
-    { id: 's2', name: 'ホットペッパー', color: '#ef4444', enabled: true, tableIds: ['t2', 't3', 't4'] },
-    { id: 's3', name: 'ぐるなび', color: '#8b5cf6', enabled: false, tableIds: ['t5', 't6'] },
+    { id: 's4', name: '自社予約サイト', color: '#0ea5e9', enabled: true, own: true, tableIds: ['t1', 't4', 't7'] },
+    { id: 's5', name: 'Instagram', color: '#ec4899', enabled: true, tableIds: ['t1', 't2', 't3'] },
+    { id: 's6', name: 'Googleマップ', color: '#16a34a', enabled: true, tableIds: ['t2', 't3', 't4'] },
   ];
 }
 function ownSite() { return (state.sites || []).find((s) => s.own); }
@@ -99,10 +99,23 @@ function load() {
       state = JSON.parse(raw);
       // 旧データの移行
       if (!state.sites) { state.sites = defaultSites(); save(); }
-      if (!state.sites.some((s) => s.own)) {
-        const cand = state.sites.find((s) => s.name === '自社サイト');
-        if (cand) cand.own = true;
-        else state.sites.unshift({ id: uid(), name: '自社サイト', color: '#0ea5e9', enabled: true, own: true, tableIds: state.tables.slice(0, 3).map((tb) => tb.id) });
+      if (!state.sitesV2) {
+        // グルメサイトの初期登録を廃止し、URL発行型のチャネル構成へ
+        state.sites = state.sites.filter((s) => !['食べログ', 'ホットペッパー', 'ぐるなび'].includes(s.name));
+        const own = state.sites.find((s) => s.own) || state.sites.find((s) => s.name === '自社サイト');
+        if (own) {
+          own.own = true;
+          if (own.name === '自社サイト') own.name = '自社予約サイト';
+        } else {
+          state.sites.unshift({ id: uid(), name: '自社予約サイト', color: '#0ea5e9', enabled: true, own: true, tableIds: state.tables.slice(0, 3).map((tb) => tb.id) });
+        }
+        if (!state.sites.some((s) => s.name === 'Instagram')) {
+          state.sites.push({ id: uid(), name: 'Instagram', color: '#ec4899', enabled: true, tableIds: state.tables.slice(0, 3).map((tb) => tb.id) });
+        }
+        if (!state.sites.some((s) => s.name === 'Googleマップ')) {
+          state.sites.push({ id: uid(), name: 'Googleマップ', color: '#16a34a', enabled: true, tableIds: state.tables.slice(0, 3).map((tb) => tb.id) });
+        }
+        state.sitesV2 = true;
         save();
       }
       return;
@@ -702,20 +715,34 @@ let editingSiteId = null;
 let siteModalTables = new Set();
 let siteModalColor = SITE_COLORS[0];
 
-function bookingUrl() {
-  if (location.protocol === 'file:') return location.href.replace(/index\.html.*$/, '') + 'booking.html';
-  return `${location.protocol}//${location.host}/booking.html`;
+/* サイトごとの予約URL（経路パラメータ付き） */
+function bookingUrl(siteId) {
+  const base = location.protocol === 'file:'
+    ? location.href.replace(/index\.html.*$/, '') + 'booking.html'
+    : `${location.protocol}//${location.host}/booking.html`;
+  return siteId ? `${base}?site=${encodeURIComponent(siteId)}` : base;
+}
+
+function copyText(txt) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(txt);
+  const ta = document.createElement('textarea');
+  ta.value = txt;
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  ta.remove();
+  return Promise.resolve();
 }
 
 function renderSites() {
-  document.getElementById('ownUrl').textContent = bookingUrl();
   const wrap = document.getElementById('siteCards');
   wrap.innerHTML = '';
   if (!state.sites.length) {
     wrap.innerHTML = `<div class="empty-note">${esc(t('noSites'))}</div>`;
   }
-  // 自社サイトを先頭に表示
+  // 自社予約サイトを先頭に表示
   [...state.sites].sort((a, b) => (b.own ? 1 : 0) - (a.own ? 1 : 0)).forEach((s) => {
+    const url = bookingUrl(s.id);
     const card = document.createElement('div');
     card.className = 'site-card';
     card.innerHTML =
@@ -723,13 +750,31 @@ function renderSites() {
       `<div class="site-main">` +
         `<div class="site-name">${esc(s.name)}</div>` +
         `<div class="site-sub">${esc(t('linkedTables'))}: ${esc(tableNames(s.tableIds))}</div>` +
+        `<div class="site-url"><code>${esc(url)}</code></div>` +
       `</div>` +
-      `<button class="pill ${s.enabled ? 'on' : 'off'}">${esc(s.enabled ? t('acceptOn') : t('acceptOff'))}</button>`;
-    card.querySelector('.pill').addEventListener('click', (e) => {
+      `<div class="site-actions">` +
+        `<button class="pill ${s.enabled ? 'on' : 'off'}" data-act="toggle">${esc(s.enabled ? t('acceptOn') : t('acceptOff'))}</button>` +
+        `<button class="btn primary small" data-act="copy">${esc(t('copyUrl'))}</button>` +
+        `<button class="btn ghost small" data-act="open">${esc(t('openSite'))}</button>` +
+      `</div>`;
+    card.querySelector('[data-act="toggle"]').addEventListener('click', (e) => {
       e.stopPropagation();
       s.enabled = !s.enabled;
       save();
       renderSites();
+    });
+    card.querySelector('[data-act="copy"]').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const btn = e.currentTarget;
+      try {
+        await copyText(url);
+        btn.textContent = t('copied');
+        setTimeout(() => { btn.textContent = t('copyUrl'); }, 1600);
+      } catch (err) { prompt('URL', url); }
+    });
+    card.querySelector('[data-act="open"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.open(url, '_blank');
     });
     card.addEventListener('click', () => openSiteModal(s.id));
     wrap.appendChild(card);
@@ -1160,24 +1205,6 @@ function init() {
 
   // 予約サイト設定
   document.getElementById('btnSitesPhone').addEventListener('click', () => setView('sites'));
-  document.getElementById('btnCopyUrl').addEventListener('click', async () => {
-    const url = bookingUrl();
-    try {
-      if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(url);
-      else {
-        const ta = document.createElement('textarea');
-        ta.value = url;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        ta.remove();
-      }
-      const btn = document.getElementById('btnCopyUrl');
-      btn.textContent = t('copied');
-      setTimeout(() => { btn.textContent = t('copyUrl'); }, 1600);
-    } catch (e) { prompt('URL', url); }
-  });
-  document.getElementById('btnOpenSite').addEventListener('click', () => window.open(bookingUrl(), '_blank'));
   document.getElementById('btnAddSite').addEventListener('click', () => openSiteModal(null));
   document.getElementById('btnSiteClose').addEventListener('click', closeSiteModal);
   document.getElementById('btnSiteCancel').addEventListener('click', closeSiteModal);

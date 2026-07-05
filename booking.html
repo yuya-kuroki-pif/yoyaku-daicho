@@ -116,7 +116,12 @@
     function db() {
       try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch (e) { return null; }
     }
-    function ownSite(st) { return (st.sites || []).find(s => s.own); }
+    /* URLの ?site= で経路（Instagram/Googleマップ等）を指定。無指定は自社予約サイト */
+    const siteParam = new URLSearchParams(location.search).get('site');
+    function ownSite(st) {
+      const sites = st.sites || [];
+      return sites.find(s => s.id === siteParam) || sites.find(s => s.own);
+    }
 
     /* 指定日時に空いている連携テーブル（人数が座れる席のみ） */
     function freeTables(st, site, date, start, pax) {
