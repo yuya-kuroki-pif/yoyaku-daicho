@@ -926,15 +926,13 @@ function init() {
   document.getElementById('viewSwitch').addEventListener('click', onNavClick);
   document.getElementById('railSettings').addEventListener('click', openSettingsModal);
 
-  const onLangClick = (e) => {
+  document.getElementById('langSwitch').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-lang]');
     if (!btn) return;
     state.settings.lang = btn.dataset.lang;
     save();
     renderAll();
-  };
-  document.getElementById('langSwitch').addEventListener('click', onLangClick);
-  document.getElementById('langSwitchPhone').addEventListener('click', onLangClick);
+  });
 
   document.getElementById('btnPrevDay').addEventListener('click', () => shiftDate(-1));
   document.getElementById('btnNextDay').addEventListener('click', () => shiftDate(1));

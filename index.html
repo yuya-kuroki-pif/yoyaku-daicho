@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
   <!-- dinii風 細線SVGアイコン定義 -->
@@ -51,14 +51,6 @@
   <!-- 左サイドバー -->
   <aside class="rail" id="rail">
     <div class="rail-logo" data-i18n="appTitle"></div>
-    <button class="rail-btn active" data-view="timetable">
-      <span class="rail-ic"><svg class="ic"><use href="#ic-calendar"/></svg></span>
-      <span class="rail-label" data-i18n="timetable"></span>
-    </button>
-    <button class="rail-btn" data-view="list">
-      <span class="rail-ic"><svg class="ic"><use href="#ic-list"/></svg></span>
-      <span class="rail-label" data-i18n="list"></span>
-    </button>
     <button class="rail-btn" data-view="customers">
       <span class="rail-ic"><svg class="ic"><use href="#ic-users"/></svg></span>
       <span class="rail-label" data-i18n="customers"></span>
@@ -68,10 +60,6 @@
       <span class="rail-label" data-i18n="settings"></span>
     </button>
     <div class="spacer"></div>
-    <div class="lang-switch rail-lang" id="langSwitch">
-      <button data-lang="ja">日本語</button>
-      <button data-lang="vi">Tiếng Việt</button>
-    </div>
   </aside>
 
   <div class="app-main">
@@ -94,9 +82,9 @@
       <div class="topbar-right">
         <span class="day-summary" id="daySummary"></span>
         <button id="btnSettings" class="icon-btn phone-only"><svg class="ic"><use href="#ic-gear"/></svg></button>
-        <div class="lang-switch phone-only" id="langSwitchPhone">
-          <button data-lang="ja">JA</button>
-          <button data-lang="vi">VI</button>
+        <div class="lang-switch" id="langSwitch">
+          <button data-lang="ja">日本語</button>
+          <button data-lang="vi">Tiếng Việt</button>
         </div>
       </div>
     </header>
@@ -258,7 +246,7 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=7"></script>
-  <script src="app.js?v=7"></script>
+  <script src="i18n.js?v=8"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>
