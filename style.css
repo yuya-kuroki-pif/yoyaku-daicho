@@ -294,10 +294,26 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
   color: var(--muted); cursor: pointer; min-height: 40px;
 }
 .cp-tab.active { border-color: var(--blue); background: var(--blue); color: #fff; }
-.cp-info {
-  font-size: 12.5px; color: var(--muted); font-weight: 600;
-  margin-bottom: 8px; text-align: center;
+/* 時間枠の伸縮（横方向の選択） */
+.cp-time { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.cp-adj {
+  border: 1px solid var(--line-strong); background: #fff; border-radius: 8px;
+  padding: 8px 8px; font-size: 12px; font-weight: 700; color: var(--blue);
+  cursor: pointer; min-height: 38px; flex: none; white-space: nowrap;
 }
+.cp-adj:active { background: var(--blue-soft); }
+#cpRange { flex: 1; text-align: center; font-size: 13.5px; font-weight: 800; white-space: nowrap; }
+/* テーブルの複数選択（縦方向の選択） */
+.cp-tables {
+  display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px;
+  max-height: 100px; overflow-y: auto;
+}
+.cp-tables button {
+  border: 1px solid var(--line-strong); background: #fff; border-radius: 999px;
+  padding: 6px 11px; font-size: 12.5px; font-weight: 700; color: var(--text);
+  cursor: pointer; min-height: 34px;
+}
+.cp-tables button.active { background: var(--blue); border-color: var(--blue); color: #fff; }
 .cp-pax { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .cp-pax button {
   border: 1px solid var(--line-strong); background: #fff; border-radius: 9px;

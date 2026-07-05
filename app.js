@@ -643,32 +643,24 @@ function renderCustomers() {
     `</tbody></table>`;
 }
 
-/* ---------- 空きマスタップのポップオーバー（トレタ風の予約/ウォークイン入力） ---------- */
+/* ---------- 空きマスタップのポップオーバー（トレタ風の予約/ウォークイン入力）
+ * 横: ±30分ボタンで時間枠を伸縮 / 縦: テーブルチップで2席以上を選択可能 ---------- */
 function openCellPopover(clientX, clientY, start, tableId, rowEl) {
   closeCellPopover();
-  const m = ttCtx ? ttCtx.metrics : ttMetrics();
   const { openMin, closeMin } = state.settings;
   start = clamp(start - (start % 15), openMin, closeMin - 15);
-  cellPick = { start, tableId, mode: 'res', selectEl: null };
-
-  // 選択ハイライト（トレタ風の青帯・既定2時間）
-  if (rowEl) {
-    const sel = document.createElement('div');
-    sel.className = 'tt-select';
-    const end = Math.min(start + 120, closeMin);
-    sel.style.left = ((start - openMin) / SLOT_MIN) * m.slotW + 1 + 'px';
-    sel.style.width = ((end - start) / SLOT_MIN) * m.slotW - 3 + 'px';
-    rowEl.appendChild(sel);
-    cellPick.selectEl = sel;
-  }
-
-  const tbName = tableId ? (tableById(tableId)?.name || '') : t('unassigned');
-  document.getElementById('cpInfo').textContent = `${tbName}　${fmtTime(start)}〜`;
-
-  // ブロックはテーブルが決まっている場合のみ（未配席行では非表示）
-  document.getElementById('cpBlock').classList.toggle('hidden', !tableId);
+  cellPick = {
+    start,
+    duration: Math.min(120, closeMin - start),
+    tables: new Set(tableId ? [tableId] : []),
+    mode: 'res',
+    selectEls: [],
+  };
 
   setCpMode('res');
+
+  document.getElementById('cpMinus').textContent = `−30${t('minutesUnit')}`;
+  document.getElementById('cpPlus').textContent = `＋30${t('minutesUnit')}`;
 
   const paxWrap = document.getElementById('cpPax');
   paxWrap.innerHTML = '';
@@ -680,11 +672,57 @@ function openCellPopover(clientX, clientY, start, tableId, rowEl) {
     paxWrap.appendChild(b);
   }
 
+  renderCpSelection();
+
   const pop = document.getElementById('cellPopover');
   pop.classList.remove('hidden');
   const w = pop.offsetWidth, h = pop.offsetHeight;
   pop.style.left = clamp(clientX + 10, 8, window.innerWidth - w - 8) + 'px';
   pop.style.top = clamp(clientY + 10, 8, window.innerHeight - h - 8) + 'px';
+}
+
+/* 選択中の時間枠・テーブルの表示とタイムライン上のハイライトを更新 */
+function renderCpSelection() {
+  if (!cellPick) return;
+  const { openMin, closeMin } = state.settings;
+  cellPick.duration = clamp(cellPick.duration, 30, closeMin - cellPick.start);
+  document.getElementById('cpRange').textContent =
+    `${fmtTime(cellPick.start)}〜${fmtTime(cellPick.start + cellPick.duration)}`;
+
+  // テーブルチップ（縦方向の複数選択）
+  const wrap = document.getElementById('cpTables');
+  wrap.innerHTML = '';
+  state.tables.forEach((tb) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cellPick.tables.has(tb.id) ? 'active' : '';
+    b.textContent = tb.name;
+    b.addEventListener('click', () => {
+      if (cellPick.tables.has(tb.id)) cellPick.tables.delete(tb.id); else cellPick.tables.add(tb.id);
+      renderCpSelection();
+    });
+    wrap.appendChild(b);
+  });
+
+  // 選択ハイライト（選択中の全テーブル行に青帯）
+  cellPick.selectEls.forEach((el) => el.remove());
+  cellPick.selectEls = [];
+  if (ttCtx && view === 'timetable') {
+    const m = ttCtx.metrics;
+    cellPick.tables.forEach((id) => {
+      const row = ttCtx.rows.find((rw) => rw.tableId === id);
+      if (!row) return;
+      const sel = document.createElement('div');
+      sel.className = 'tt-select';
+      sel.style.left = ((cellPick.start - openMin) / SLOT_MIN) * m.slotW + 1 + 'px';
+      sel.style.width = (cellPick.duration / SLOT_MIN) * m.slotW - 3 + 'px';
+      row.rowEl.appendChild(sel);
+      cellPick.selectEls.push(sel);
+    });
+  }
+
+  // ブロックは1席以上選択時のみ
+  document.getElementById('cpBlock').classList.toggle('hidden', cellPick.tables.size === 0);
 }
 
 function setCpMode(mode) {
@@ -695,26 +733,27 @@ function setCpMode(mode) {
 
 function onCpPax(n) {
   if (!cellPick) return;
-  const { start, tableId, mode } = cellPick;
+  const { start, duration, tables, mode } = cellPick;
+  const ids = [...tables];
   closeCellPopover();
-  if (mode === 'walkin') createWalkIn(start, tableId, n);
-  else openResModal(null, { start, tableId, adults: n });
+  if (mode === 'walkin') createWalkIn(start, ids, n, duration);
+  else openResModal(null, { start, tableIds: ids, adults: n, duration });
 }
 
-/* 予約ブロック: この席・時間帯をネット予約の在庫から外す */
-function createBlock(start, tableId) {
-  if (!tableId) return;
+/* 予約ブロック: 選択した席×時間枠をネット予約の在庫から外す */
+function createBlock(start, tableIds, duration) {
+  if (!tableIds.length) return;
   state.reservations.push({
     id: uid(),
     date: currentDate,
     start,
-    duration: 120,
+    duration: duration || 120,
     adults: 0,
     children: 0,
     name: t('statusBlock'),
     kana: '',
     phone: '',
-    tableIds: [tableId],
+    tableIds,
     course: '',
     memo: '',
     status: 'block',
@@ -726,24 +765,24 @@ function createBlock(start, tableId) {
 }
 
 function closeCellPopover() {
-  if (cellPick && cellPick.selectEl) cellPick.selectEl.remove();
+  if (cellPick) cellPick.selectEls.forEach((el) => el.remove());
   cellPick = null;
   document.getElementById('cellPopover').classList.add('hidden');
 }
 
 /* ウォークインをその場で即時登録（来店中） */
-function createWalkIn(start, tableId, pax) {
+function createWalkIn(start, tableIds, pax, duration) {
   const res = {
     id: uid(),
     date: currentDate,
     start,
-    duration: 120,
+    duration: duration || 120,
     adults: pax,
     children: 0,
     name: t('walkInName'),
     kana: '',
     phone: '',
-    tableIds: tableId ? [tableId] : [],
+    tableIds: tableIds || [],
     course: '',
     memo: '',
     status: 'seated',
@@ -1008,7 +1047,15 @@ function openResModal(resId, prefill = {}) {
   let start = r ? r.start : (prefill.start ?? defaultStart());
   start = clamp(start - (start % 15), openMin, closeMin - 15);
   document.getElementById('fStart').value = start;
-  document.getElementById('fDur').value = r ? r.duration : 120;
+  const durSel = document.getElementById('fDur');
+  const durVal = r ? r.duration : (prefill.duration ?? 120);
+  if (![...durSel.options].some((o) => Number(o.value) === durVal)) {
+    const opt = document.createElement('option');
+    opt.value = durVal;
+    opt.textContent = `${durVal} ${t('minutesUnit')}`;
+    durSel.appendChild(opt);
+  }
+  durSel.value = durVal;
 
   document.getElementById('fAdults').textContent = r ? r.adults : (prefill.adults ?? 2);
   document.getElementById('fChildren').textContent = r ? r.children : 0;
@@ -1024,7 +1071,7 @@ function openResModal(resId, prefill = {}) {
     state.sites.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
   chSel.value = r ? (r.channel || '') : (prefill.channel || '');
 
-  modalTables = new Set(r ? r.tableIds : (prefill.tableId ? [prefill.tableId] : []));
+  modalTables = new Set(r ? r.tableIds : (prefill.tableIds ?? (prefill.tableId ? [prefill.tableId] : [])));
   renderModalTables();
 
   modalStatus = r ? r.status : (modalWalkIn ? 'seated' : 'reserved');
@@ -1228,9 +1275,21 @@ function init() {
   document.getElementById('cpTabWalkIn').addEventListener('click', () => setCpMode('walkin'));
   document.getElementById('cpBlock').addEventListener('click', () => {
     if (!cellPick) return;
-    const { start, tableId } = cellPick;
+    const { start, duration, tables } = cellPick;
+    const ids = [...tables];
     closeCellPopover();
-    createBlock(start, tableId);
+    createBlock(start, ids, duration);
+  });
+  // 時間枠の伸縮（±30分）
+  document.getElementById('cpMinus').addEventListener('click', () => {
+    if (!cellPick) return;
+    cellPick.duration -= 30;
+    renderCpSelection();
+  });
+  document.getElementById('cpPlus').addEventListener('click', () => {
+    if (!cellPick) return;
+    cellPick.duration += 30;
+    renderCpSelection();
   });
   // ポップオーバーの外側をタップで閉じる
   document.addEventListener('pointerdown', (e) => {
