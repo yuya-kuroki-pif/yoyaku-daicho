@@ -113,6 +113,16 @@ svg.ic {
   position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer;
 }
 
+/* dinii風 タイムライン/予約一覧 切替 */
+.view-switch { display: flex; border: 1px solid var(--line-strong); border-radius: 10px; overflow: hidden; margin-left: 24px; }
+.vs-btn {
+  border: none; background: #fff; color: var(--muted);
+  padding: 10px 22px; font-size: 14.5px; cursor: pointer; white-space: nowrap; font-weight: 600;
+  min-height: 44px;
+}
+.vs-btn + .vs-btn { border-left: 1px solid var(--line-strong); }
+.vs-btn.active { color: var(--blue); box-shadow: inset 0 0 0 2px var(--blue); background: #fff; }
+
 .topbar-right { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
 .day-summary { font-size: 14px; color: var(--text); font-weight: 700; white-space: nowrap; }
 
@@ -453,6 +463,7 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
   .hide-phone { display: none !important; }
 
   .topbar { padding: 8px 10px; gap: 8px; }
+  .view-switch { display: none; }
   .nav-btn { width: 40px; height: 40px; font-size: 18px; }
   .date-box { min-height: 40px; padding: 6px 12px; font-size: 14px; }
   .btn.small { min-height: 40px; padding: 6px 10px; }

@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
   <!-- dinii風 細線SVGアイコン定義 -->
@@ -86,6 +86,11 @@
         <button id="btnToday" class="btn ghost small" data-i18n="today"></button>
       </div>
 
+      <nav class="view-switch" id="viewSwitch">
+        <button class="vs-btn active" data-view="timetable" data-i18n="timetable"></button>
+        <button class="vs-btn" data-view="list" data-i18n="list"></button>
+      </nav>
+
       <div class="topbar-right">
         <span class="day-summary" id="daySummary"></span>
         <button id="btnSettings" class="icon-btn phone-only"><svg class="ic"><use href="#ic-gear"/></svg></button>
@@ -93,8 +98,6 @@
           <button data-lang="ja">JA</button>
           <button data-lang="vi">VI</button>
         </div>
-        <button id="btnWalkIn" class="btn secondary hide-phone"><svg class="ic"><use href="#ic-walkin"/></svg> <span data-i18n="walkIn"></span></button>
-        <button id="btnNew" class="btn primary hide-phone"><svg class="ic"><use href="#ic-plus"/></svg> <span data-i18n="newReservation"></span></button>
       </div>
     </header>
 
@@ -255,7 +258,7 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=6"></script>
-  <script src="app.js?v=6"></script>
+  <script src="i18n.js?v=7"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

@@ -886,9 +886,11 @@ function saveSettings() {
 /* ---------- view switching / render ---------- */
 function setView(v) {
   view = v;
-  document.querySelectorAll('.rail-btn[data-view], #bottomNav .bn-btn').forEach((b) => {
+  document.querySelectorAll('.rail-btn[data-view], #bottomNav .bn-btn, #viewSwitch .vs-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.view === v);
   });
+  // 顧客台帳ではタイムライン/予約一覧の切替を隠す（dinii同様、席管理内の切替のため）
+  document.getElementById('viewSwitch').classList.toggle('hidden', v === 'customers');
   document.getElementById('view-timetable').classList.toggle('hidden', v !== 'timetable');
   document.getElementById('view-list').classList.toggle('hidden', v !== 'list');
   document.getElementById('view-customers').classList.toggle('hidden', v !== 'customers');
@@ -921,6 +923,7 @@ function init() {
   };
   document.getElementById('rail').addEventListener('click', onNavClick);
   document.getElementById('bottomNav').addEventListener('click', onNavClick);
+  document.getElementById('viewSwitch').addEventListener('click', onNavClick);
   document.getElementById('railSettings').addEventListener('click', openSettingsModal);
 
   const onLangClick = (e) => {
@@ -940,8 +943,6 @@ function init() {
     if (e.target.value) { currentDate = e.target.value; renderAll(); }
   });
 
-  document.getElementById('btnNew').addEventListener('click', () => openResModal(null));
-  document.getElementById('btnWalkIn').addEventListener('click', () => openResModal(null, { walkIn: true }));
   document.getElementById('fabNew').addEventListener('click', () => openResModal(null));
   document.getElementById('fabWalkIn').addEventListener('click', () => openResModal(null, { walkIn: true }));
 
