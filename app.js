@@ -334,9 +334,17 @@ function renderTimetable() {
 
     const label = document.createElement('div');
     label.className = 'tt-label';
-    // 予約最小人数が設定されていれば「3〜4席」のように範囲表示
-    const seatsText = (tb.min && tb.min > 1 && tb.min < tb.seats) ? `${tb.min}〜${tb.seats}` : `${tb.seats}`;
-    label.innerHTML = `<span class="tname">${esc(tb.name)}</span><span class="tseats">${seatsText} ${esc(t('seatsUnit'))}</span>`;
+    // 予約最小人数を席数と併記。席数＞最小なら「3〜4席」、席数＝最小なら「2名〜2席」形式で明示
+    const unit = esc(t('seatsUnit'));
+    let seatsText;
+    if (tb.min && tb.min > 1 && tb.min < tb.seats) {
+      seatsText = `${tb.min}〜${tb.seats} ${unit}`;
+    } else if (tb.min && tb.min > 1) {
+      seatsText = `${tb.min}${esc(t('guestsUnit'))}〜${tb.seats} ${unit}`;
+    } else {
+      seatsText = `${tb.seats} ${unit}`;
+    }
+    label.innerHTML = `<span class="tname">${esc(tb.name)}</span><span class="tseats">${seatsText}</span>`;
     line.appendChild(label);
 
     const row = document.createElement('div');
