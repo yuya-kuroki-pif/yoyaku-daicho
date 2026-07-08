@@ -23,6 +23,8 @@ let editingId = null;          // 編集中の予約ID（新規は null）
 let modalStatus = 'reserved';  // モーダル内で選択中のステータス
 let modalTables = new Set();   // モーダル内で選択中のテーブルID
 let modalWalkIn = false;
+let modalCourses = [];         // モーダル内で選択中のコース [{courseId, quantity}]
+let modalTags = new Set();     // モーダル内で選択中のタグID
 
 let ttCtx = null;              // タイムテーブル描画コンテキスト（ドラッグ用）
 let drag = null;               // 進行中のドラッグ情報
@@ -70,8 +72,8 @@ function defaultState() {
   ];
   const today = todayStr();
   const reservations = [
-    { id: uid(), date: today, start: 12 * 60, duration: 90, adults: 2, children: 0, name: '田中', kana: 'タナカ', phone: '090-1111-2222', tableIds: ['t1'], course: '', memo: '', status: 'finished', walkIn: false },
-    { id: uid(), date: today, start: 18 * 60, duration: 120, adults: 4, children: 0, name: '佐藤', kana: 'サトウ', phone: '090-3333-4444', tableIds: ['t2'], course: '飲み放題', memo: '窓際希望', status: 'reserved', walkIn: false },
+    { id: uid(), date: today, start: 12 * 60, duration: 90, adults: 2, children: 0, name: '田中', kana: 'タナカ', phone: '090-1111-2222', company: '株式会社ABC', reservationName: '', email: 'tanaka@example.com', gender: 1, purpose: 2, hasTimeLimit: false, resetTime: 0, tableIds: ['t1'], courses: [], tags: ['tag10'], memo: '', status: 'finished', walkIn: false },
+    { id: uid(), date: today, start: 18 * 60, duration: 120, adults: 4, children: 0, name: '佐藤', kana: 'サトウ', phone: '090-3333-4444', company: '', reservationName: '', email: '', gender: 0, purpose: 1, hasTimeLimit: true, resetTime: 15, tableIds: ['t2'], courses: [{ courseId: 'crs1', quantity: 4 }], tags: ['tag1', 'tag2'], memo: '窓際希望', status: 'reserved', walkIn: false },
     { id: uid(), date: today, start: 18 * 60 + 30, duration: 120, adults: 5, children: 1, name: 'Nguyễn Văn An', kana: '', phone: '070-5555-6666', tableIds: ['t7'], course: '', memo: 'Sinh nhật / 誕生日', status: 'reserved', walkIn: false },
     { id: uid(), date: today, start: 19 * 60, duration: 90, adults: 2, children: 0, name: '山本', kana: 'ヤマモト', phone: '', tableIds: ['t5'], course: '', memo: '', status: 'reserved', walkIn: false },
     { id: uid(), date: today, start: 21 * 60, duration: 90, adults: 4, children: 0, name: 'あいだ はなこ', kana: 'アイダ ハナコ', phone: '080-7777-8888', tableIds: [], course: '', memo: '', status: 'reserved', walkIn: false },
@@ -80,11 +82,26 @@ function defaultState() {
     tables,
     reservations,
     sites: defaultSites(),
+    courses: defaultCourses(),
+    tags: defaultTags(),
     sitesV2: true,
     tablesV2: true,
     combos: [{ id: 'cb1', tableIds: ['t1', 't2'], max: 8 }],
     settings: { lang: 'ja', openMin: 11 * 60, closeMin: 23 * 60 },
   };
+}
+/* コースマスタ（reservation_courses が参照） */
+function defaultCourses() {
+  return [
+    { id: 'crs1', name: 'MSスタンダードコース' },
+    { id: 'crs2', name: 'MSマグロ堪能コース' },
+    { id: 'crs3', name: 'マグロ極みコース' },
+  ];
+}
+/* タグマスタ（reservation_tags が参照） */
+function defaultTags() {
+  return ['記念日', '席指定', 'アレルギー', '予約クーポン', 'ポイント割引', 'コース', '対応注文', '短時OK', '要連絡', '初来店', '知人紹介', '口コミ', '2時間', '性飲み放題', 'SNS']
+    .map((name, i) => ({ id: 'tag' + (i + 1), name }));
 }
 function defaultSites() {
   return [
@@ -132,6 +149,9 @@ function load() {
         state.combos = (tableById('t1') && tableById('t2')) ? [{ id: uid(), tableIds: ['t1', 't2'], max: 8 }] : [];
         save();
       }
+      // コース／タグのマスタ（予約フォームの選択肢）
+      if (!state.courses) { state.courses = defaultCourses(); save(); }
+      if (!state.tags) { state.tags = defaultTags(); save(); }
       return;
     }
   } catch (e) { /* 壊れたデータは初期化 */ }
@@ -191,13 +211,27 @@ function buildVisitMap() {
 }
 /* ブロック/カード内の名前行（経路色・名前・人数・来店回数チップ・コースアイコン） */
 function siteById(id) { return (state.sites || []).find((s) => s.id === id); }
+function courseById(id) { return (state.courses || []).find((c) => c.id === id); }
+/* 予約にコースが付いているか（構造化 courses 優先、旧 course 文字列も許容） */
+function resHasCourse(r) { return !!(r.courses && r.courses.length) || !!r.course; }
+/* コース名の表示文字列（例: MSスタンダードコース×4・マグロ極みコース） */
+function resCourseText(r) {
+  if (r.courses && r.courses.length) {
+    return r.courses.map((c) => {
+      const m = courseById(c.courseId);
+      if (!m) return '';
+      return c.quantity > 1 ? `${m.name}×${c.quantity}` : m.name;
+    }).filter(Boolean).join('・');
+  }
+  return r.course || '';
+}
 function blockNameHtml(r, visitMap) {
   const pax = (r.adults || 0) + (r.children || 0);
   const visits = visitMap.get(custKey(r)) || 0;
   const chip = visits > 0
     ? `<span class="chip-visit">${esc(dict().fmtVisits(visits))}</span>`
     : `<span class="chip-visit">${esc(t('firstVisit'))}</span>`;
-  const courseIco = r.course ? '<span class="b-ico">🍴</span>' : '';
+  const courseIco = resHasCourse(r) ? '<span class="b-ico">🍴</span>' : '';
   const site = siteById(r.channel);
   const dot = site ? `<span class="ch-dot" style="background:${esc(site.color)}"></span>` : '';
   return `${dot}${esc(r.name)} <span>${esc(dict().fmtPax(pax))}</span> ${chip}${courseIco}`;
@@ -249,7 +283,7 @@ function renderTimetable() {
     if (end <= openMin || start >= closeMin) return null;
     const block = document.createElement('div');
     let cls = 'tt-block ' + r.status;
-    if (r.status === 'reserved' && r.course) cls += ' course';
+    if (r.status === 'reserved' && resHasCourse(r)) cls += ' course';
     if (fromTableId === null) cls += ' unassigned';
     if (span) cls += ' span'; // 複数卓を1つの枠として表示（グリッド直下に配置）
     block.className = cls;
@@ -651,7 +685,7 @@ function renderList() {
   list.forEach((r) => {
     const card = document.createElement('div');
     let cls = 'res-card ' + r.status;
-    if (r.status === 'reserved' && r.course) cls += ' course';
+    if (r.status === 'reserved' && resHasCourse(r)) cls += ' course';
     card.className = cls;
     let quick = '';
     if (r.status === 'reserved') quick = `<button class="btn small primary" data-quick="seated">${esc(t('quickSeat'))}</button>`;
@@ -660,7 +694,7 @@ function renderList() {
       `<div class="rc-time">${fmtTime(r.start)}<small>${fmtTime(r.start + r.duration)}</small></div>` +
       `<div class="rc-main">` +
         `<div class="rc-name">${blockNameHtml(r, visitMap)}</div>` +
-        `<div class="rc-sub">${esc(tableNames(r.tableIds))}${(() => { const s = siteById(r.channel); return s ? '　🌐 ' + esc(s.name) : ''; })()}${r.phone ? '　📞 ' + esc(r.phone) : ''}${r.course ? '　🍴 ' + esc(r.course) : ''}${r.memo ? '　📝 ' + esc(r.memo) : ''}</div>` +
+        `<div class="rc-sub">${esc(tableNames(r.tableIds))}${(() => { const s = siteById(r.channel); return s ? '　🌐 ' + esc(s.name) : ''; })()}${r.phone ? '　📞 ' + esc(r.phone) : ''}${resHasCourse(r) ? '　🍴 ' + esc(resCourseText(r)) : ''}${r.memo ? '　📝 ' + esc(r.memo) : ''}</div>` +
       `</div>` +
       `<div class="rc-actions">${quick}<span class="status-chip ${r.status}">${esc(statusLabel(r.status))}</span></div>`;
     card.addEventListener('click', () => openResModal(r.id));
@@ -684,10 +718,12 @@ function buildCustomers() {
     if (r.status === 'block') return;
     if (!r.name && !r.phone) return;
     const key = r.phone ? 'p:' + r.phone : 'n:' + r.name;
-    if (!map.has(key)) map.set(key, { name: r.name, kana: r.kana, phone: r.phone, visits: 0, lastVisit: '' });
+    if (!map.has(key)) map.set(key, { name: r.name, kana: r.kana, phone: r.phone, company: '', email: '', visits: 0, lastVisit: '' });
     const c = map.get(key);
     if (r.name) c.name = r.name;
     if (r.kana) c.kana = r.kana;
+    if (r.company) c.company = r.company;
+    if (r.email) c.email = r.email;
     if (r.status === 'seated' || r.status === 'finished') {
       c.visits += 1;
       if (r.date > c.lastVisit) c.lastVisit = r.date;
@@ -703,7 +739,9 @@ function renderCustomers() {
     customers = customers.filter((c) =>
       (c.name || '').toLowerCase().includes(q) ||
       (c.kana || '').toLowerCase().includes(q) ||
-      (c.phone || '').includes(q)
+      (c.phone || '').includes(q) ||
+      (c.company || '').toLowerCase().includes(q) ||
+      (c.email || '').toLowerCase().includes(q)
     );
   }
   const wrap = document.getElementById('custWrap');
@@ -714,10 +752,12 @@ function renderCustomers() {
   wrap.innerHTML =
     `<table class="cust-table"><thead><tr>` +
     `<th>${esc(t('name'))}</th><th>${esc(t('nameKana'))}</th><th>${esc(t('phone'))}</th>` +
+    `<th>${esc(t('company'))}</th><th>${esc(t('email'))}</th>` +
     `<th>${esc(t('visitCount'))}</th><th>${esc(t('lastVisit'))}</th>` +
     `</tr></thead><tbody>` +
     customers.map((c) =>
       `<tr><td>${esc(c.name)}</td><td>${esc(c.kana || '')}</td><td>${esc(c.phone || '')}</td>` +
+      `<td>${esc(c.company || '')}</td><td>${esc(c.email || '')}</td>` +
       `<td class="num">${c.visits} ${esc(t('timesUnit'))}</td><td>${esc(c.lastVisit || '-')}</td></tr>`
     ).join('') +
     `</tbody></table>`;
@@ -1218,6 +1258,60 @@ function fillTimeSelects() {
     opt.textContent = `${d} ${t('minutesUnit')}`;
     durSel.appendChild(opt);
   });
+  // リセットタイム（0 / 15 / 30分）
+  const resetSel = document.getElementById('fReset');
+  resetSel.innerHTML = '';
+  [0, 15, 30].forEach((m) => {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = `${m} ${t('minutesUnit')}`;
+    resetSel.appendChild(opt);
+  });
+  // 性別（0:不明 / 1:男性 / 2:女性）
+  const genSel = document.getElementById('fGender');
+  genSel.innerHTML = t('genderOptions')
+    .map((label, i) => `<option value="${i}">${esc(label)}</option>`).join('');
+  // 利用目的（指定なし + 1〜9）
+  const purSel = document.getElementById('fPurpose');
+  purSel.innerHTML = `<option value="">${esc(t('purposeNone'))}</option>` +
+    t('purposeOptions').map((label, i) => `<option value="${i + 1}">${esc(label)}</option>`).join('');
+}
+
+/* コース（reservation_courses）: マスタから選択＋数量。1予約に複数登録可 */
+function renderModalCourses() {
+  const wrap = document.getElementById('fCourses');
+  wrap.innerHTML = '';
+  modalCourses.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'course-row';
+    const opts = (state.courses || [])
+      .map((m) => `<option value="${esc(m.id)}"${m.id === c.courseId ? ' selected' : ''}>${esc(m.name)}</option>`).join('');
+    row.innerHTML =
+      `<select class="cr-course"><option value="">${esc(t('courseSelect'))}</option>${opts}</select>` +
+      `<input type="number" class="cr-qty" min="1" max="99" value="${c.quantity || 1}" title="${esc(t('quantity'))}">` +
+      `<button type="button" class="icon-btn cr-del">🗑</button>`;
+    row.querySelector('.cr-course').addEventListener('change', (e) => { c.courseId = e.target.value; });
+    row.querySelector('.cr-qty').addEventListener('change', (e) => { c.quantity = Math.max(1, Number(e.target.value) || 1); });
+    row.querySelector('.cr-del').addEventListener('click', () => { modalCourses.splice(i, 1); renderModalCourses(); });
+    wrap.appendChild(row);
+  });
+}
+
+/* タグ（reservation_tags）: マスタから複数選択（多対多） */
+function renderModalTags() {
+  const wrap = document.getElementById('fTags');
+  wrap.innerHTML = '';
+  (state.tags || []).forEach((tg) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip' + (modalTags.has(tg.id) ? ' active' : '');
+    chip.textContent = tg.name;
+    chip.addEventListener('click', () => {
+      if (modalTags.has(tg.id)) modalTags.delete(tg.id); else modalTags.add(tg.id);
+      renderModalTags();
+    });
+    wrap.appendChild(chip);
+  });
 }
 
 function renderModalTables() {
@@ -1273,13 +1367,27 @@ function openResModal(resId, prefill = {}) {
   }
   durSel.value = durVal;
 
+  document.getElementById('fReset').value = r ? (r.resetTime || 0) : 0;
+  document.getElementById('fHasLimit').checked = r ? !!r.hasTimeLimit : false;
+
   document.getElementById('fAdults').textContent = r ? r.adults : (prefill.adults ?? 2);
   document.getElementById('fChildren').textContent = r ? r.children : 0;
   document.getElementById('fName').value = r ? r.name : (modalWalkIn ? t('walkInName') : '');
   document.getElementById('fKana').value = r ? (r.kana || '') : '';
   document.getElementById('fPhone').value = r ? (r.phone || '') : '';
-  document.getElementById('fCourse').value = r ? (r.course || '') : '';
+  document.getElementById('fGender').value = r ? (r.gender || 0) : 0;
+  document.getElementById('fCompany').value = r ? (r.company || '') : '';
+  document.getElementById('fResName').value = r ? (r.reservationName || '') : '';
+  document.getElementById('fEmail').value = r ? (r.email || '') : '';
+  document.getElementById('fPurpose').value = r ? (r.purpose || '') : '';
   document.getElementById('fMemo').value = r ? (r.memo || '') : '';
+
+  // コース（構造化）: 旧データの course 文字列があれば移行表示はせず、courses配列を優先
+  modalCourses = r && r.courses ? r.courses.map((c) => ({ ...c })) : [];
+  renderModalCourses();
+  // タグ
+  modalTags = new Set(r ? (r.tags || []) : []);
+  renderModalTags();
 
   // 予約経路（店頭・電話＋登録済みサイト）
   const chSel = document.getElementById('fChannel');
@@ -1325,24 +1433,41 @@ function hasConflict(res) {
 
 function saveReservation() {
   const name = document.getElementById('fName').value.trim();
-  if (!name) { alert(t('nameRequired')); return; }
+  const phone = document.getElementById('fPhone').value.trim();
+  // 携帯番号かお名前のいずれか必須（CSVのCHECK制約に合わせる）
+  if (!name && !phone) { alert(t('nameRequired')); return; }
 
+  const prev = state.reservations.find((x) => x.id === editingId);
+  const now = new Date().toISOString();
+  const start = Number(document.getElementById('fStart').value);
+  const duration = Number(document.getElementById('fDur').value);
   const res = {
     id: editingId || uid(),
     date: document.getElementById('fDate').value || currentDate,
-    start: Number(document.getElementById('fStart').value),
-    duration: Number(document.getElementById('fDur').value),
+    start,
+    duration,
+    end: start + duration,                                   // end_time（start + 滞在時間）
+    hasTimeLimit: document.getElementById('fHasLimit').checked,
+    resetTime: Number(document.getElementById('fReset').value) || 0,
     adults: Number(document.getElementById('fAdults').textContent),
     children: Number(document.getElementById('fChildren').textContent),
     name,
     kana: document.getElementById('fKana').value.trim(),
-    phone: document.getElementById('fPhone').value.trim(),
+    phone,
+    gender: Number(document.getElementById('fGender').value) || 0,
+    company: document.getElementById('fCompany').value.trim(),
+    reservationName: document.getElementById('fResName').value.trim(),
+    email: document.getElementById('fEmail').value.trim(),
+    purpose: document.getElementById('fPurpose').value ? Number(document.getElementById('fPurpose').value) : '',
     tableIds: [...modalTables],
-    course: document.getElementById('fCourse').value.trim(),
+    courses: modalCourses.filter((c) => c.courseId).map((c) => ({ courseId: c.courseId, quantity: Math.max(1, c.quantity || 1) })),
+    tags: [...modalTags],
     memo: document.getElementById('fMemo').value.trim(),
     channel: document.getElementById('fChannel').value,
     status: modalStatus,
     walkIn: modalWalkIn,
+    createdAt: prev ? (prev.createdAt || now) : now,
+    updatedAt: now,
   };
 
   if (res.tableIds.length && hasConflict(res) && !confirm(t('conflictWarn'))) return;
@@ -1815,6 +1940,10 @@ function init() {
   document.getElementById('btnResCancel').addEventListener('click', closeResModal);
   document.getElementById('btnResSave').addEventListener('click', saveReservation);
   document.getElementById('btnResDelete').addEventListener('click', deleteReservation);
+  document.getElementById('btnAddCourse').addEventListener('click', () => {
+    modalCourses.push({ courseId: '', quantity: 1 });
+    renderModalCourses();
+  });
 
   document.querySelectorAll('.step-btn').forEach((b) => {
     b.addEventListener('click', () => {

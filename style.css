@@ -511,6 +511,23 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
 }
 .chip.active { border-color: var(--blue); background: var(--blue); color: #fff; font-weight: 600; }
 
+/* コース選択行（コース名 + 数量 + 削除） */
+.course-row { display: grid; grid-template-columns: 1fr 78px 44px; gap: 8px; margin-bottom: 8px; }
+.course-row select, .course-row input {
+  border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px 12px;
+  font-size: 16px; min-height: 46px; min-width: 0;
+}
+.course-row .icon-btn { color: var(--red); }
+#btnAddCourse { margin-top: 2px; }
+
+/* 時間制限ありチェック */
+.checkbox-field { justify-content: flex-end; }
+.checkbox-field .chk {
+  display: flex; align-items: center; gap: 8px; font-size: 14.5px;
+  color: var(--text); font-weight: 500; cursor: pointer; min-height: 46px;
+}
+.checkbox-field .chk input { width: 20px; height: 20px; }
+
 .status-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .status-btn {
   border: 1.5px solid var(--line-strong); background: #fff; border-radius: 10px;
