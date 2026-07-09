@@ -718,7 +718,7 @@ function buildCustomers() {
     if (r.status === 'block') return;
     if (!r.name && !r.phone) return;
     const key = r.phone ? 'p:' + r.phone : 'n:' + r.name;
-    if (!map.has(key)) map.set(key, { name: r.name, kana: r.kana, phone: r.phone, company: '', email: '', visits: 0, lastVisit: '' });
+    if (!map.has(key)) map.set(key, { key, name: r.name, kana: r.kana, phone: r.phone, company: '', email: '', visits: 0, lastVisit: '' });
     const c = map.get(key);
     if (r.name) c.name = r.name;
     if (r.kana) c.kana = r.kana;
@@ -756,11 +756,100 @@ function renderCustomers() {
     `<th>${esc(t('visitCount'))}</th><th>${esc(t('lastVisit'))}</th>` +
     `</tr></thead><tbody>` +
     customers.map((c) =>
-      `<tr><td>${esc(c.name)}</td><td>${esc(c.kana || '')}</td><td>${esc(c.phone || '')}</td>` +
+      `<tr class="cust-row" data-key="${esc(c.key)}"><td>${esc(c.name)}</td><td>${esc(c.kana || '')}</td><td>${esc(c.phone || '')}</td>` +
       `<td>${esc(c.company || '')}</td><td>${esc(c.email || '')}</td>` +
       `<td class="num">${c.visits} ${esc(t('timesUnit'))}</td><td>${esc(c.lastVisit || '-')}</td></tr>`
     ).join('') +
     `</tbody></table>`;
+  // 顧客行タップ → 来店・予約履歴の詳細
+  wrap.querySelectorAll('.cust-row').forEach((tr) => {
+    tr.addEventListener('click', () => openCustomerDetail(tr.dataset.key));
+  });
+}
+
+/* ---------- 顧客詳細（来店・予約履歴） ---------- */
+function tagNames(ids) {
+  return (ids || []).map((id) => { const tg = (state.tags || []).find((x) => x.id === id); return tg ? tg.name : ''; }).filter(Boolean);
+}
+function genderLabel(g) { return t('genderOptions')[g || 0] || ''; }
+function purposeLabel(p) { return p ? (t('purposeOptions')[p - 1] || '') : ''; }
+function fmtYmd(s) {
+  const [y, m, d] = String(s).split('-').map(Number);
+  if (!y) return s;
+  const wd = new Date(y, m - 1, d).getDay();
+  return dict().fmtDateBox(y, m, d, wd);
+}
+/* 指定顧客の予約を日付降順で取得（ブロックは除外） */
+function customerReservations(key) {
+  return state.reservations
+    .filter((r) => r.status !== 'block' && custKey(r) === key)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.start - a.start));
+}
+
+function openCustomerDetail(key) {
+  const list = customerReservations(key);
+  if (!list.length) return;
+  // 顧客の基本情報（最新の非空値を採用）
+  let name = '', kana = '', phone = '', company = '', email = '', gender = 0, resName = '', visits = 0, lastVisit = '';
+  list.forEach((r) => {
+    if (r.name && !name) name = r.name;
+    if (r.kana && !kana) kana = r.kana;
+    if (r.phone && !phone) phone = r.phone;
+    if (r.company && !company) company = r.company;
+    if (r.email && !email) email = r.email;
+    if (r.gender && !gender) gender = r.gender;
+    if (r.reservationName && !resName) resName = r.reservationName;
+    if (r.status === 'seated' || r.status === 'finished') { visits += 1; if (r.date > lastVisit) lastVisit = r.date; }
+  });
+
+  document.getElementById('custModalTitle').textContent = name || phone || '';
+
+  const info = [
+    [t('nameKana'), kana],
+    [t('phone'), phone],
+    [t('company'), company],
+    [t('reservationName'), resName],
+    [t('email'), email],
+    [t('gender'), gender ? genderLabel(gender) : ''],
+    [t('visitCount'), `${visits} ${t('timesUnit')}`],
+    [t('lastVisit'), lastVisit ? fmtYmd(lastVisit) : '-'],
+  ];
+  document.getElementById('custDetailInfo').innerHTML = info
+    .map(([k, v]) => `<div class="cd-item"><span class="cd-k">${esc(k)}</span><span class="cd-v">${esc(v || '-')}</span></div>`).join('');
+
+  document.getElementById('custHistHead').textContent = `${t('visitHistory')}（${list.length}）`;
+  document.getElementById('custHistHint').textContent = t('historyHint');
+
+  const hist = document.getElementById('custHistory');
+  hist.innerHTML = list.map((r) => {
+    const time = `${fmtTime(r.start)}〜${fmtTime(r.start + r.duration)}`;
+    const pax = `${(r.adults || 0) + (r.children || 0)}${t('guestsUnit')}`;
+    const tbls = tableNames(r.tableIds) || t('unassigned');
+    const site = siteById(r.channel);
+    const purpose = purposeLabel(r.purpose);
+    const course = resCourseText(r);
+    const tags = tagNames(r.tags);
+    const parts = [`🍽 ${esc(tbls)}`, `👥 ${esc(pax)}`];
+    if (site) parts.push(`🌐 ${esc(site.name)}`);
+    if (purpose) parts.push(`🎯 ${esc(purpose)}`);
+    if (course) parts.push(`🍴 ${esc(course)}`);
+    return `<div class="ch-row" data-res="${esc(r.id)}">` +
+      `<div class="ch-head"><span class="ch-date">${esc(fmtYmd(r.date))}　${esc(time)}</span>` +
+      `<span class="status-chip ${r.status}">${esc(statusLabel(r.status))}</span></div>` +
+      `<div class="ch-body">${parts.join('　')}</div>` +
+      (tags.length ? `<div class="ch-tags">${tags.map((tg) => `<span class="mini-tag">${esc(tg)}</span>`).join('')}</div>` : '') +
+      (r.memo ? `<div class="ch-memo">📝 ${esc(r.memo)}</div>` : '') +
+      `</div>`;
+  }).join('');
+  // 履歴行タップ → その予約を開く
+  hist.querySelectorAll('.ch-row').forEach((row) => {
+    row.addEventListener('click', () => { closeCustomerDetail(); openResModal(row.dataset.res); });
+  });
+
+  document.getElementById('custModal').classList.remove('hidden');
+}
+function closeCustomerDetail() {
+  document.getElementById('custModal').classList.add('hidden');
 }
 
 /* ---------- 空きマスタップ/ドラッグのポップオーバー（トレタ風の予約/ウォークイン入力）
@@ -1944,6 +2033,8 @@ function init() {
     modalCourses.push({ courseId: '', quantity: 1 });
     renderModalCourses();
   });
+  document.getElementById('btnCustClose').addEventListener('click', closeCustomerDetail);
+  document.getElementById('btnCustCloseFooter').addEventListener('click', closeCustomerDetail);
 
   document.querySelectorAll('.step-btn').forEach((b) => {
     b.addEventListener('click', () => {

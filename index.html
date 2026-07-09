@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=24">
+  <link rel="stylesheet" href="style.css?v=25">
 </head>
 <body>
   <!-- dinii風 細線SVGアイコン定義 -->
@@ -362,7 +362,27 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=24"></script>
-  <script src="app.js?v=24"></script>
+  <!-- Customer detail modal（顧客情報・来店履歴） -->
+  <div class="modal-backdrop hidden" id="custModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="custModalTitle"></h2>
+        <button class="icon-btn" id="btnCustClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="cust-detail" id="custDetailInfo"></div>
+        <h3 class="sec" id="custHistHead"></h3>
+        <p class="hist-hint" id="custHistHint"></p>
+        <div class="cust-history" id="custHistory"></div>
+      </div>
+      <div class="modal-footer">
+        <span class="spacer"></span>
+        <button class="btn ghost" id="btnCustCloseFooter" data-i18n="cancelBtn"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="i18n.js?v=25"></script>
+  <script src="app.js?v=25"></script>
 </body>
 </html>

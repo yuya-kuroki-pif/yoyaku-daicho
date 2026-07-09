@@ -141,6 +141,9 @@ const I18N = {
     addCourse: '＋ コースを追加',
     quantity: '数量',
     tagsLabel: 'タグ',
+    visitHistory: '来店・予約履歴',
+    noHistory: '履歴がありません',
+    historyHint: '行をタップすると該当予約を開けます',
 
     weekdays: ['日', '月', '火', '水', '木', '金', '土'],
     fmtDate(y, m, d, wd) { return `${y}年${m}月${d}日（${this.weekdays[wd]}）`; },
@@ -290,6 +293,9 @@ const I18N = {
     addCourse: '＋ Thêm course',
     quantity: 'Số lượng',
     tagsLabel: 'Thẻ',
+    visitHistory: 'Lịch sử đặt bàn / đến',
+    noHistory: 'Chưa có lịch sử',
+    historyHint: 'Chạm vào dòng để mở đơn đặt bàn',
 
     weekdays: ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'],
     fmtDate(y, m, d, wd) { return `${this.weekdays[wd]}, ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`; },
