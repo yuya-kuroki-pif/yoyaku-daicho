@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=25">
+  <link rel="stylesheet" href="style.css?v=26">
 </head>
 <body>
   <!-- dinii風 細線SVGアイコン定義 -->
@@ -93,9 +93,11 @@
       <nav class="view-switch" id="viewSwitch">
         <button class="vs-btn active" data-view="timetable" data-i18n="timetable"></button>
         <button class="vs-btn" data-view="list" data-i18n="list"></button>
+        <button class="vs-btn" data-view="calendar" data-i18n="calendar"></button>
       </nav>
 
       <div class="topbar-right">
+        <button id="newBadge" class="new-badge hidden"></button>
         <span class="day-summary" id="daySummary"></span>
         <button id="btnChatPhone" class="icon-btn phone-only"><svg class="ic"><use href="#ic-chat"/></svg></button>
         <button id="btnSitesPhone" class="icon-btn phone-only"><svg class="ic"><use href="#ic-globe"/></svg></button>
@@ -109,12 +111,28 @@
 
     <main>
       <section id="view-timetable" class="view">
+        <div class="closed-banner hidden" id="closedBanner"></div>
         <div class="tt-scroll" id="ttScroll"></div>
         <div class="legend" id="legend"></div>
       </section>
 
       <section id="view-list" class="view hidden">
+        <div class="list-toolbar">
+          <input type="search" id="listSearch" class="search-input" data-i18n-placeholder="listSearchPlaceholder" autocomplete="off">
+          <div class="filter-chips" id="listFilters"></div>
+          <button class="btn ghost small hide-phone" id="btnPrint">🖨 <span data-i18n="print"></span></button>
+        </div>
         <div class="list-wrap" id="listWrap"></div>
+      </section>
+
+      <section id="view-calendar" class="view hidden">
+        <div class="cal-toolbar">
+          <button id="calPrev" class="nav-btn">‹</button>
+          <span class="cal-title" id="calTitle"></span>
+          <button id="calNext" class="nav-btn">›</button>
+          <button id="calToday" class="btn ghost small" data-i18n="today"></button>
+        </div>
+        <div class="cal-wrap" id="calWrap"></div>
       </section>
 
       <section id="view-customers" class="view hidden">
@@ -149,6 +167,7 @@
   <nav class="bottom-nav" id="bottomNav">
     <button class="bn-btn active" data-view="timetable"><span class="bn-ic"><svg class="ic"><use href="#ic-calendar"/></svg></span><span data-i18n="timetable"></span></button>
     <button class="bn-btn" data-view="list"><span class="bn-ic"><svg class="ic"><use href="#ic-list"/></svg></span><span data-i18n="list"></span></button>
+    <button class="bn-btn" data-view="calendar"><span class="bn-ic"><svg class="ic"><use href="#ic-calendar"/></svg></span><span data-i18n="calendar"></span></button>
     <button class="bn-btn" data-view="customers"><span class="bn-ic"><svg class="ic"><use href="#ic-users"/></svg></span><span data-i18n="customers"></span></button>
   </nav>
   <div class="fabs">
@@ -233,7 +252,8 @@
           </div>
           <div class="field">
             <label data-i18n="phone"></label>
-            <input type="tel" id="fPhone" data-i18n-placeholder="phonePlaceholder">
+            <input type="tel" id="fPhone" data-i18n-placeholder="phonePlaceholder" autocomplete="off">
+            <div class="field-hint hidden" id="fPhoneHint"></div>
           </div>
           <div class="field">
             <label data-i18n="gender"></label>
@@ -278,6 +298,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn danger hidden" id="btnResDelete" data-i18n="delete"></button>
+        <button class="btn ghost hidden" id="btnResDup" data-i18n="duplicate"></button>
         <span class="spacer"></span>
         <button class="btn ghost" id="btnResCancel" data-i18n="cancelBtn"></button>
         <button class="btn primary" id="btnResSave" data-i18n="save"></button>
@@ -317,6 +338,34 @@
         <p class="combo-note" data-i18n="comboNote"></p>
         <div id="comboRows"></div>
         <button class="btn ghost full" id="btnAddCombo"><svg class="ic"><use href="#ic-plus"/></svg> <span data-i18n="addCombo"></span></button>
+
+        <h3 class="combo-heading" data-i18n="closedDaysLabel"></h3>
+        <div class="table-chips" id="sClosedDays"></div>
+        <div class="closed-dates">
+          <label data-i18n="closedDatesLabel"></label>
+          <div class="closed-date-add">
+            <input type="date" id="sClosedDateInput">
+            <button type="button" class="btn ghost small" id="btnAddClosedDate" data-i18n="addClosedDate"></button>
+          </div>
+          <div class="table-chips" id="sClosedDates"></div>
+        </div>
+
+        <h3 class="combo-heading" data-i18n="coursesHeading"></h3>
+        <div id="courseRows"></div>
+        <button class="btn ghost full" id="btnAddCourseMaster"><svg class="ic"><use href="#ic-plus"/></svg> <span data-i18n="addCourseMaster"></span></button>
+
+        <h3 class="combo-heading" data-i18n="tagsHeading"></h3>
+        <div id="tagRows"></div>
+        <button class="btn ghost full" id="btnAddTagMaster"><svg class="ic"><use href="#ic-plus"/></svg> <span data-i18n="addTagMaster"></span></button>
+
+        <h3 class="combo-heading" data-i18n="backupHeading"></h3>
+        <p class="combo-note" data-i18n="backupNote"></p>
+        <div class="backup-actions">
+          <button type="button" class="btn ghost" id="btnExportJson">💾 <span data-i18n="exportJson"></span></button>
+          <button type="button" class="btn ghost" id="btnImportJson">📂 <span data-i18n="importJson"></span></button>
+          <button type="button" class="btn ghost" id="btnExportCsv">📄 <span data-i18n="exportCsv"></span></button>
+          <input type="file" id="importFile" accept="application/json,.json" class="hidden">
+        </div>
       </div>
       <div class="modal-footer">
         <span class="spacer"></span>
@@ -382,7 +431,7 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=25"></script>
-  <script src="app.js?v=25"></script>
+  <script src="i18n.js?v=26"></script>
+  <script src="app.js?v=26"></script>
 </body>
 </html>

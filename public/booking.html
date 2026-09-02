@@ -84,6 +84,7 @@
         noData: 'ただいま準備中です。', noSlot: '選択できる時間がありません',
         done: 'ご予約を受け付けました', doneSub: 'ご来店を心よりお待ちしております。',
         back: '新しい予約をする', taken: '申し訳ありません、その時間は埋まりました。別の時間をお選びください。',
+        closedDay: '定休日のためご予約いただけません。別の日をお選びください。',
         pax_(n) { return `${n}名`; },
         date_(y, m, d, wd) { return `${y}年${m}月${d}日（${['日','月','火','水','木','金','土'][wd]}）`; },
       },
@@ -95,6 +96,7 @@
         noData: 'Đang chuẩn bị.', noSlot: 'Không có khung giờ trống',
         done: 'Đã nhận đặt bàn!', doneSub: 'Rất mong được đón tiếp quý khách.',
         back: 'Đặt bàn mới', taken: 'Rất tiếc, khung giờ đó vừa kín. Vui lòng chọn giờ khác.',
+        closedDay: 'Ngày nghỉ của cửa hàng, không nhận đặt bàn. Vui lòng chọn ngày khác.',
         pax_(n) { return `${n} khách`; },
         date_(y, m, d, wd) { return `${['CN','T2','T3','T4','T5','T6','T7'][wd]}, ${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`; },
       },
@@ -121,6 +123,14 @@
     function ownSite(st) {
       const sites = st.sites || [];
       return sites.find(s => s.id === siteParam) || sites.find(s => s.own);
+    }
+
+    /* 定休日（曜日）・臨時休業日の判定（台帳の設定と連動） */
+    function isClosed(st, date) {
+      const s = st.settings || {};
+      const [y, m, d] = date.split('-').map(Number);
+      const wd = new Date(y, m - 1, d).getDay();
+      return (s.closedDays || []).includes(wd) || (s.closedDates || []).includes(date);
     }
 
     /* 指定日時・人数で確保するテーブルを決定（1卓 → 結合テーブルの順に探す）
@@ -172,8 +182,9 @@
       const now = new Date();
       const nowMin = now.getHours() * 60 + now.getMinutes();
 
+      const closed = isClosed(st, selDate);
       let timesHtml = '';
-      for (let m = openMin; m <= lastStart; m += 30) {
+      for (let m = openMin; m <= lastStart && !closed; m += 30) {
         if (selDate === todayStr() && m < nowMin) continue;
         const ok = !!findAssignment(st, site, selDate, m, selPax);
         const sel = selTime === m ? ' sel' : '';
@@ -186,7 +197,7 @@
           [1,2,3,4,5,6,7,8].map(n => `<button type="button" data-pax="${n}" class="${selPax === n ? 'sel' : ''}">${esc(T[lang].pax_(n))}</button>`).join('') +
         `</div></div>` +
         `<div class="card"><h2>${esc(t('time'))}</h2>` +
-          (timesHtml ? `<div class="grid times" id="bTimes">${timesHtml}</div>` : `<div class="note">${esc(t('noSlot'))}</div>`) +
+          (timesHtml ? `<div class="grid times" id="bTimes">${timesHtml}</div>` : `<div class="note">${esc(closed ? t('closedDay') : t('noSlot'))}</div>`) +
         `</div>` +
         `<div class="card">` +
           `<div class="field"><label>${esc(t('name'))}</label><input type="text" id="bName"></div>` +
@@ -234,6 +245,7 @@
       const st = db();
       const site = ownSite(st);
       if (!site || !site.enabled) { render(); return; }
+      if (isClosed(st, selDate)) { alert(t('closedDay')); selTime = null; keepInputs(render); return; }
       const assign = findAssignment(st, site, selDate, selTime, selPax);
       if (!assign) { alert(t('taken')); selTime = null; keepInputs(render); return; }
 
@@ -253,6 +265,8 @@
         status: 'reserved',
         walkIn: false,
         channel: site.id,
+        isNew: true,   // 台帳側で「未確認」バッジを表示
+        createdAt: new Date().toISOString(),
       };
       st.reservations.push(res);
       localStorage.setItem(LS_KEY, JSON.stringify(st));

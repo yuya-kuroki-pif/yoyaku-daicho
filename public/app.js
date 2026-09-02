@@ -30,6 +30,12 @@ let ttCtx = null;              // タイムテーブル描画コンテキスト�
 let drag = null;               // 進行中のドラッグ情報
 let suppressClick = false;     // ドラッグ直後のclick誤発火防止
 let cellPick = null;           // 空きマスタップのポップオーバー状態 {start, tableId, mode, selectEl}
+let listFilter = { q: '', status: 'all' };   // 予約一覧の検索語・ステータス絞り込み
+let calMonth = null;                          // カレンダー表示中の年月 {y, m}
+let courseWork = [];                          // 設定モーダル内のコースマスタ作業コピー
+let tagWork = [];                             // 設定モーダル内のタグマスタ作業コピー
+let closedDaysWork = new Set();               // 設定モーダル内の定休日（曜日）
+let closedDatesWork = [];                     // 設定モーダル内の臨時休業日
 
 /* ---------- helpers ---------- */
 function pad2(n) { return String(n).padStart(2, '0'); }
@@ -87,7 +93,7 @@ function defaultState() {
     sitesV2: true,
     tablesV2: true,
     combos: [{ id: 'cb1', tableIds: ['t1', 't2'], max: 8 }],
-    settings: { lang: 'ja', openMin: 11 * 60, closeMin: 23 * 60 },
+    settings: { lang: 'ja', openMin: 11 * 60, closeMin: 23 * 60, closedDays: [], closedDates: [] },
   };
 }
 /* コースマスタ（reservation_courses が参照） */
@@ -152,6 +158,9 @@ function load() {
       // コース／タグのマスタ（予約フォームの選択肢）
       if (!state.courses) { state.courses = defaultCourses(); save(); }
       if (!state.tags) { state.tags = defaultTags(); save(); }
+      // 定休日・臨時休業日
+      if (!state.settings.closedDays) { state.settings.closedDays = []; save(); }
+      if (!state.settings.closedDates) { state.settings.closedDates = []; save(); }
       return;
     }
   } catch (e) { /* 壊れたデータは初期化 */ }
@@ -159,6 +168,26 @@ function load() {
   save();
 }
 function save() { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+
+/* ---------- 定休日・顧客照合・席数チェックの共通ヘルパー ---------- */
+function isClosedDate(date) {
+  const [y, m, d] = String(date).split('-').map(Number);
+  if (!y) return false;
+  const wd = new Date(y, m - 1, d).getDay();
+  return (state.settings.closedDays || []).includes(wd) || (state.settings.closedDates || []).includes(date);
+}
+function normPhone(p) { return String(p || '').replace(/\D/g, ''); }
+function isActiveRes(r) { return r.status !== 'cancelled' && r.status !== 'noshow' && r.status !== 'block'; }
+/* 未確認のネット予約（今日以降・予約ステータス） */
+function newReservations() {
+  const today = todayStr();
+  return state.reservations.filter((r) => r.isNew && r.status === 'reserved' && r.date >= today);
+}
+function seatsOf(ids) { return (ids || []).reduce((s, id) => s + (tableById(id)?.seats || 0), 0); }
+function overCapacity(res) {
+  const pax = (res.adults || 0) + (res.children || 0);
+  return (res.tableIds || []).length > 0 && pax > seatsOf(res.tableIds);
+}
 
 function dayReservations(date) {
   return state.reservations
@@ -194,6 +223,12 @@ function renderDateBar() {
   const list = dayReservations(currentDate).filter((r) => r.status !== 'cancelled' && r.status !== 'noshow' && r.status !== 'block');
   const guests = list.reduce((sum, r) => sum + (r.adults || 0) + (r.children || 0), 0);
   document.getElementById('daySummary').textContent = dict().fmtSummary(list.length, guests);
+
+  // 未確認のネット予約バッジ（今日以降の全日程）
+  const newCount = newReservations().length;
+  const badge = document.getElementById('newBadge');
+  badge.classList.toggle('hidden', newCount === 0);
+  badge.textContent = dict().fmtNew(newCount);
 }
 
 /* ---------- 来店回数（dinii風「n回」チップ用） ---------- */
@@ -234,12 +269,18 @@ function blockNameHtml(r, visitMap) {
   const courseIco = resHasCourse(r) ? '<span class="b-ico">🍴</span>' : '';
   const site = siteById(r.channel);
   const dot = site ? `<span class="ch-dot" style="background:${esc(site.color)}"></span>` : '';
-  return `${dot}${esc(r.name)} <span>${esc(dict().fmtPax(pax))}</span> ${chip}${courseIco}`;
+  const newChip = r.isNew ? '<span class="chip-new">NEW</span>' : '';
+  return `${newChip}${dot}${esc(r.name)} <span>${esc(dict().fmtPax(pax))}</span> ${chip}${courseIco}`;
 }
 
 /* ---------- timetable view ---------- */
 function renderTimetable() {
   const { openMin, closeMin } = state.settings;
+  // 定休日バナー
+  const banner = document.getElementById('closedBanner');
+  const closedToday = isClosedDate(currentDate);
+  banner.classList.toggle('hidden', !closedToday);
+  banner.textContent = closedToday ? t('closedBanner') : '';
   const m = ttMetrics();
   document.documentElement.style.setProperty('--slot-w', m.slotW + 'px');
   document.documentElement.style.setProperty('--label-w', m.labelW + 'px');
@@ -286,6 +327,7 @@ function renderTimetable() {
     if (r.status === 'reserved' && resHasCourse(r)) cls += ' course';
     if (fromTableId === null) cls += ' unassigned';
     if (span) cls += ' span'; // 複数卓を1つの枠として表示（グリッド直下に配置）
+    if (r.isNew) cls += ' isnew';
     block.className = cls;
     block.dataset.resId = r.id;
     block.style.left = (span ? m.labelW : 0) + ((start - openMin) / SLOT_MIN) * m.slotW + 1 + 'px';
@@ -672,12 +714,45 @@ function cleanupDragVisuals(d) {
   document.querySelectorAll('.tt-row.drop-target').forEach((rw) => rw.classList.remove('drop-target'));
 }
 
-/* ---------- list view ---------- */
+/* ---------- list view（当日一覧 / 全期間検索 / ステータス絞り込み） ---------- */
+function renderListFilters() {
+  const wrap = document.getElementById('listFilters');
+  const opts = [['all', t('filterAll')], ['new', t('filterNew')], ...STATUSES.map((s) => [s, statusLabel(s)])];
+  wrap.innerHTML = opts.map(([v, l]) =>
+    `<button type="button" class="fchip${listFilter.status === v ? ' active' : ''}" data-f="${v}">${esc(l)}</button>`).join('');
+  wrap.querySelectorAll('.fchip').forEach((b) => {
+    b.addEventListener('click', () => { listFilter.status = b.dataset.f; renderList(); });
+  });
+  const inp = document.getElementById('listSearch');
+  if (inp.value !== listFilter.q) inp.value = listFilter.q;
+}
+
 function renderList() {
+  renderListFilters();
   const wrap = document.getElementById('listWrap');
-  const list = dayReservations(currentDate).filter((r) => r.status !== 'block');
+  const q = listFilter.q.trim().toLowerCase();
+  const qDigits = q.replace(/\D/g, '');
+  // 検索語あり・未確認フィルタ時は全期間を対象にする
+  const global = !!q || listFilter.status === 'new';
+  let list;
+  if (global) {
+    list = state.reservations.filter((r) => r.status !== 'block');
+    if (q) {
+      list = list.filter((r) =>
+        (r.name || '').toLowerCase().includes(q) ||
+        (r.kana || '').toLowerCase().includes(q) ||
+        (r.reservationName || '').toLowerCase().includes(q) ||
+        (qDigits.length >= 3 && normPhone(r.phone).includes(qDigits)));
+    }
+    list.sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.start - b.start);
+  } else {
+    list = dayReservations(currentDate).filter((r) => r.status !== 'block');
+  }
+  if (listFilter.status === 'new') list = list.filter((r) => r.isNew);
+  else if (listFilter.status !== 'all') list = list.filter((r) => r.status === listFilter.status);
+
   if (!list.length) {
-    wrap.innerHTML = `<div class="empty-note">${esc(t('noReservations'))}</div>`;
+    wrap.innerHTML = `<div class="empty-note">${esc(global || listFilter.status !== 'all' ? t('noResults') : t('noReservations'))}</div>`;
     return;
   }
   wrap.innerHTML = '';
@@ -686,27 +761,30 @@ function renderList() {
     const card = document.createElement('div');
     let cls = 'res-card ' + r.status;
     if (r.status === 'reserved' && resHasCourse(r)) cls += ' course';
+    if (r.isNew) cls += ' isnew';
     card.className = cls;
     let quick = '';
-    if (r.status === 'reserved') quick = `<button class="btn small primary" data-quick="seated">${esc(t('quickSeat'))}</button>`;
-    else if (r.status === 'seated') quick = `<button class="btn small secondary" data-quick="finished">${esc(t('quickFinish'))}</button>`;
+    if (r.isNew) quick += `<button class="btn small secondary" data-quick="confirm">${esc(t('confirmBtn'))}</button>`;
+    if (r.status === 'reserved') quick += `<button class="btn small primary" data-quick="seated">${esc(t('quickSeat'))}</button>`;
+    else if (r.status === 'seated') quick += `<button class="btn small secondary" data-quick="finished">${esc(t('quickFinish'))}</button>`;
+    const site = siteById(r.channel);
     card.innerHTML =
-      `<div class="rc-time">${fmtTime(r.start)}<small>${fmtTime(r.start + r.duration)}</small></div>` +
+      `<div class="rc-time">${global ? `<small class="rc-date">${esc(fmtYmd(r.date))}</small>` : ''}${fmtTime(r.start)}<small>${fmtTime(r.start + r.duration)}</small></div>` +
       `<div class="rc-main">` +
         `<div class="rc-name">${blockNameHtml(r, visitMap)}</div>` +
-        `<div class="rc-sub">${esc(tableNames(r.tableIds))}${(() => { const s = siteById(r.channel); return s ? '　🌐 ' + esc(s.name) : ''; })()}${r.phone ? '　📞 ' + esc(r.phone) : ''}${resHasCourse(r) ? '　🍴 ' + esc(resCourseText(r)) : ''}${r.memo ? '　📝 ' + esc(r.memo) : ''}</div>` +
+        `<div class="rc-sub">${esc(tableNames(r.tableIds))}${site ? '　🌐 ' + esc(site.name) : ''}${r.phone ? '　📞 ' + esc(r.phone) : ''}${resHasCourse(r) ? '　🍴 ' + esc(resCourseText(r)) : ''}${r.memo ? '　📝 ' + esc(r.memo) : ''}</div>` +
       `</div>` +
       `<div class="rc-actions">${quick}<span class="status-chip ${r.status}">${esc(statusLabel(r.status))}</span></div>`;
     card.addEventListener('click', () => openResModal(r.id));
-    const qbtn = card.querySelector('[data-quick]');
-    if (qbtn) {
+    card.querySelectorAll('[data-quick]').forEach((qbtn) => {
       qbtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        r.status = qbtn.dataset.quick;
+        if (qbtn.dataset.quick !== 'confirm') r.status = qbtn.dataset.quick;
+        r.isNew = false;   // 来店・会計・確認のいずれでも未確認を解除
         save();
         renderAll();
       });
-    }
+    });
     wrap.appendChild(card);
   });
 }
@@ -1107,6 +1185,7 @@ function createWalkIn(start, tableIds, pax, duration, date) {
     walkIn: true,
   };
   if (res.tableIds.length && hasConflict(res) && !confirm(t('conflictWarn'))) return;
+  if (overCapacity(res) && !confirm(t('capacityWarn'))) return;
   state.reservations.push(res);
   save();
   renderAll();
@@ -1435,11 +1514,13 @@ function renderModalStatus() {
 function openResModal(resId, prefill = {}) {
   editingId = resId;
   const r = resId ? state.reservations.find((x) => x.id === resId) : null;
+  const base = r || prefill.copy || null;   // 複製時は元予約のお客様情報・内容を引き継ぐ
   modalWalkIn = prefill.walkIn || (r ? !!r.walkIn : false);
 
   fillTimeSelects();
 
-  document.getElementById('resModalTitle').textContent = r ? t('editResTitle') : (modalWalkIn ? t('walkIn') : t('newResTitle'));
+  document.getElementById('resModalTitle').textContent =
+    (r ? t('editResTitle') : (modalWalkIn ? t('walkIn') : t('newResTitle'))) + (r && r.isNew ? '　🆕' : '');
   document.getElementById('fDate').value = r ? r.date : currentDate;
 
   const { openMin, closeMin } = state.settings;
@@ -1456,33 +1537,34 @@ function openResModal(resId, prefill = {}) {
   }
   durSel.value = durVal;
 
-  document.getElementById('fReset').value = r ? (r.resetTime || 0) : 0;
-  document.getElementById('fHasLimit').checked = r ? !!r.hasTimeLimit : false;
+  document.getElementById('fReset').value = base ? (base.resetTime || 0) : 0;
+  document.getElementById('fHasLimit').checked = base ? !!base.hasTimeLimit : false;
 
-  document.getElementById('fAdults').textContent = r ? r.adults : (prefill.adults ?? 2);
-  document.getElementById('fChildren').textContent = r ? r.children : 0;
-  document.getElementById('fName').value = r ? r.name : (modalWalkIn ? t('walkInName') : '');
-  document.getElementById('fKana').value = r ? (r.kana || '') : '';
-  document.getElementById('fPhone').value = r ? (r.phone || '') : '';
-  document.getElementById('fGender').value = r ? (r.gender || 0) : 0;
-  document.getElementById('fCompany').value = r ? (r.company || '') : '';
-  document.getElementById('fResName').value = r ? (r.reservationName || '') : '';
-  document.getElementById('fEmail').value = r ? (r.email || '') : '';
-  document.getElementById('fPurpose').value = r ? (r.purpose || '') : '';
-  document.getElementById('fMemo').value = r ? (r.memo || '') : '';
+  document.getElementById('fAdults').textContent = base ? base.adults : (prefill.adults ?? 2);
+  document.getElementById('fChildren').textContent = base ? (base.children || 0) : 0;
+  document.getElementById('fName').value = base ? base.name : (modalWalkIn ? t('walkInName') : '');
+  document.getElementById('fKana').value = base ? (base.kana || '') : '';
+  document.getElementById('fPhone').value = base ? (base.phone || '') : '';
+  document.getElementById('fGender').value = base ? (base.gender || 0) : 0;
+  document.getElementById('fCompany').value = base ? (base.company || '') : '';
+  document.getElementById('fResName').value = base ? (base.reservationName || '') : '';
+  document.getElementById('fEmail').value = base ? (base.email || '') : '';
+  document.getElementById('fPurpose').value = base ? (base.purpose || '') : '';
+  document.getElementById('fMemo').value = base ? (base.memo || '') : '';
+  document.getElementById('fPhoneHint').classList.add('hidden');
 
   // コース（構造化）: 旧データの course 文字列があれば移行表示はせず、courses配列を優先
-  modalCourses = r && r.courses ? r.courses.map((c) => ({ ...c })) : [];
+  modalCourses = base && base.courses ? base.courses.map((c) => ({ ...c })) : [];
   renderModalCourses();
   // タグ
-  modalTags = new Set(r ? (r.tags || []) : []);
+  modalTags = new Set(base ? (base.tags || []) : []);
   renderModalTags();
 
   // 予約経路（店頭・電話＋登録済みサイト）
   const chSel = document.getElementById('fChannel');
   chSel.innerHTML = `<option value="">${esc(t('channelNone'))}</option>` +
     state.sites.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
-  chSel.value = r ? (r.channel || '') : (prefill.channel || '');
+  chSel.value = base ? (base.channel || '') : (prefill.channel || '');
 
   modalTables = new Set(r ? r.tableIds : (prefill.tableIds ?? (prefill.tableId ? [prefill.tableId] : [])));
   renderModalTables();
@@ -1493,7 +1575,41 @@ function openResModal(resId, prefill = {}) {
   if (r) renderModalStatus();
 
   document.getElementById('btnResDelete').classList.toggle('hidden', !r);
+  document.getElementById('btnResDup').classList.toggle('hidden', !r);
   document.getElementById('resModal').classList.remove('hidden');
+}
+
+/* 編集中の予約を元に新規予約を作成（同じお客様の別日予約などに） */
+function duplicateReservation() {
+  const r = state.reservations.find((x) => x.id === editingId);
+  if (!r) return;
+  closeResModal();
+  openResModal(null, { copy: r, start: r.start, duration: r.duration });
+}
+
+/* 電話番号から過去の予約を探し、空欄のお客様情報を自動入力 */
+function findCustomerByPhone(phone) {
+  const p = normPhone(phone);
+  if (p.length < 10) return null;
+  return state.reservations
+    .filter((r) => r.id !== editingId && r.status !== 'block' && normPhone(r.phone) === p)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0] || null;
+}
+function autofillFromPhone() {
+  const hint = document.getElementById('fPhoneHint');
+  const src = findCustomerByPhone(document.getElementById('fPhone').value);
+  if (!src) { hint.classList.add('hidden'); return; }
+  const fill = (id, v) => { const el = document.getElementById(id); if (!el.value.trim() && v) el.value = v; };
+  fill('fName', src.name);
+  fill('fKana', src.kana);
+  fill('fCompany', src.company);
+  fill('fResName', src.reservationName);
+  fill('fEmail', src.email);
+  const g = document.getElementById('fGender');
+  if (Number(g.value) === 0 && src.gender) g.value = src.gender;
+  const visits = buildVisitMap().get(custKey(src)) || 0;
+  hint.textContent = `✓ ${t('autofilled')}（${visits ? dict().fmtVisits(visits) : t('firstVisit')}）`;
+  hint.classList.remove('hidden');
 }
 
 function defaultStart() {
@@ -1560,6 +1676,7 @@ function saveReservation() {
   };
 
   if (res.tableIds.length && hasConflict(res) && !confirm(t('conflictWarn'))) return;
+  if (overCapacity(res) && !confirm(t('capacityWarn'))) return;
 
   const idx = state.reservations.findIndex((x) => x.id === res.id);
   if (idx >= 0) state.reservations[idx] = res; else state.reservations.push(res);
@@ -1607,6 +1724,16 @@ function openSettingsModal() {
   // 結合（合席）設定の作業コピー
   comboWork = (state.combos || []).map((c) => ({ ...c, tableIds: [...c.tableIds] }));
   renderComboRows();
+
+  // 定休日・臨時休業日
+  closedDaysWork = new Set(state.settings.closedDays || []);
+  closedDatesWork = [...(state.settings.closedDates || [])];
+  renderClosedSettings();
+  // コース・タグのマスタ（作業コピー）
+  courseWork = (state.courses || []).map((c) => ({ ...c }));
+  tagWork = (state.tags || []).map((c) => ({ ...c }));
+  renderMasterRows('courseRows', courseWork);
+  renderMasterRows('tagRows', tagWork);
 
   document.getElementById('settingsModal').classList.remove('hidden');
 }
@@ -1692,6 +1819,12 @@ function saveSettings() {
       min: Math.min(Math.max(1, c.min || 1), c.max || 1),
     }))
     .filter((c) => c.tableIds.length >= 2 && (c.max || 0) >= 1);
+  // 定休日・臨時休業日
+  state.settings.closedDays = [...closedDaysWork].sort((a, b) => a - b);
+  state.settings.closedDates = [...new Set(closedDatesWork)].sort();
+  // コース・タグのマスタ（空名は除外）
+  state.courses = courseWork.filter((c) => c.name.trim()).map((c) => ({ id: c.id, name: c.name.trim() }));
+  state.tags = tagWork.filter((c) => c.name.trim()).map((c) => ({ id: c.id, name: c.name.trim() }));
   save();
   document.getElementById('settingsModal').classList.add('hidden');
   renderAll();
@@ -1944,9 +2077,175 @@ function chatSubmit() {
   chatAppend('bot', reply);
 }
 
+/* ---------- 月間カレンダー（日別の組数・人数、定休日、未確認ネット予約） ---------- */
+function renderCalendar() {
+  if (!calMonth) {
+    const [y, m] = currentDate.split('-').map(Number);
+    calMonth = { y, m };
+  }
+  const { y, m } = calMonth;
+  document.getElementById('calTitle').textContent = dict().fmtMonth(y, m);
+  const firstDow = new Date(y, m - 1, 1).getDay();
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const prefix = `${y}-${pad2(m)}-`;
+
+  const counts = new Map();
+  state.reservations.forEach((r) => {
+    if (!isActiveRes(r) || !String(r.date).startsWith(prefix)) return;
+    const c = counts.get(r.date) || { groups: 0, pax: 0, isNew: 0 };
+    c.groups += 1;
+    c.pax += (r.adults || 0) + (r.children || 0);
+    if (r.isNew) c.isNew += 1;
+    counts.set(r.date, c);
+  });
+
+  const today = todayStr();
+  let html = '<div class="cal-grid">' +
+    dict().weekdays.map((w, i) => `<div class="cal-wd${i === 0 ? ' sun' : i === 6 ? ' sat' : ''}">${esc(w)}</div>`).join('');
+  for (let i = 0; i < firstDow; i++) html += '<div class="cal-cell empty"></div>';
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = prefix + pad2(d);
+    const dow = (firstDow + d - 1) % 7;
+    const c = counts.get(date);
+    const closed = isClosedDate(date);
+    let cls = 'cal-cell';
+    if (date === today) cls += ' today';
+    if (date === currentDate) cls += ' selected';
+    if (closed) cls += ' closed';
+    if (dow === 0) cls += ' sun';
+    if (dow === 6) cls += ' sat';
+    html += `<div class="${cls}" data-date="${date}">` +
+      `<div class="cal-day">${d}` +
+        (closed ? `<span class="cal-closed">${esc(t('closedShort'))}</span>` : '') +
+        (c && c.isNew ? `<span class="chip-new">${c.isNew}</span>` : '') +
+      `</div>` +
+      (c ? `<div class="cal-count">${c.groups}${esc(t('groupsUnit'))}</div><div class="cal-pax">${c.pax}${esc(t('guestsUnit'))}</div>` : '') +
+      `</div>`;
+  }
+  html += '</div>';
+  const wrap = document.getElementById('calWrap');
+  wrap.innerHTML = html;
+  // 日付タップ → その日のタイムラインへ
+  wrap.querySelectorAll('.cal-cell[data-date]').forEach((el) => {
+    el.addEventListener('click', () => { currentDate = el.dataset.date; setView('timetable'); });
+  });
+}
+
+function shiftCalMonth(n) {
+  if (!calMonth) renderCalendar();
+  let { y, m } = calMonth;
+  m += n;
+  while (m < 1) { m += 12; y -= 1; }
+  while (m > 12) { m -= 12; y += 1; }
+  calMonth = { y, m };
+  renderCalendar();
+}
+
+/* ---------- 設定モーダル: 定休日・臨時休業日 ---------- */
+function renderClosedSettings() {
+  const wd = document.getElementById('sClosedDays');
+  wd.innerHTML = '';
+  dict().weekdays.forEach((w, i) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip' + (closedDaysWork.has(i) ? ' active' : '');
+    chip.textContent = w;
+    chip.addEventListener('click', () => {
+      if (closedDaysWork.has(i)) closedDaysWork.delete(i); else closedDaysWork.add(i);
+      renderClosedSettings();
+    });
+    wd.appendChild(chip);
+  });
+  const dw = document.getElementById('sClosedDates');
+  dw.innerHTML = '';
+  [...closedDatesWork].sort().forEach((d) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip active';
+    chip.textContent = `${fmtYmd(d)} ✕`;
+    chip.addEventListener('click', () => {
+      closedDatesWork = closedDatesWork.filter((x) => x !== d);
+      renderClosedSettings();
+    });
+    dw.appendChild(chip);
+  });
+}
+
+/* ---------- 設定モーダル: コース・タグのマスタ編集 ---------- */
+function renderMasterRows(wrapId, list) {
+  const wrap = document.getElementById(wrapId);
+  wrap.innerHTML = '';
+  list.forEach((item, i) => {
+    const row = document.createElement('div');
+    row.className = 'master-row';
+    row.innerHTML = `<input type="text" value="${esc(item.name)}"><button type="button" class="icon-btn">🗑</button>`;
+    row.querySelector('input').addEventListener('input', (e) => { item.name = e.target.value; });
+    row.querySelector('.icon-btn').addEventListener('click', () => { list.splice(i, 1); renderMasterRows(wrapId, list); });
+    wrap.appendChild(row);
+  });
+}
+
+/* ---------- データのバックアップ・復元・CSV出力 ---------- */
+function downloadFile(name, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+function exportJson() {
+  downloadFile(`yoyaku-backup-${todayStr()}.json`, JSON.stringify(state, null, 2), 'application/json');
+}
+function importJsonFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!data || !Array.isArray(data.reservations) || !Array.isArray(data.tables) || !data.settings) throw new Error('invalid');
+      if (!confirm(t('importConfirm'))) return;
+      localStorage.setItem(LS_KEY, JSON.stringify(data));
+      load(); // 旧形式の移行処理も適用
+      document.getElementById('settingsModal').classList.add('hidden');
+      renderAll();
+    } catch (e) {
+      alert(t('importError'));
+    }
+  };
+  reader.readAsText(file);
+}
+function csvCell(v) {
+  const s = String(v ?? '');
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function exportCsv() {
+  const head = [t('date'), t('startTime'), t('endTime'), t('statusLabel'), t('name'), t('nameKana'), t('phone'),
+    t('adults'), t('children'), t('tablesLabel'), t('channel'), t('coursesLabel'), t('tagsLabel'), t('memo')];
+  const rows = state.reservations
+    .filter((r) => r.status !== 'block')
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.start - b.start)
+    .map((r) => [
+      r.date, fmtTime(r.start), fmtTime(r.start + r.duration), statusLabel(r.status),
+      r.name || '', r.kana || '', r.phone || '', r.adults || 0, r.children || 0,
+      (r.tableIds || []).map((id) => tableById(id)?.name).filter(Boolean).join('+'),
+      siteById(r.channel)?.name || (r.walkIn ? t('walkInName') : t('channelNone')),
+      resCourseText(r), tagNames(r.tags).join('/'), r.memo || '',
+    ]);
+  const csv = '﻿' + [head, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
+  downloadFile(`yoyaku-${todayStr()}.csv`, csv, 'text/csv;charset=utf-8');
+}
+
 /* ---------- view switching / render ---------- */
 function setView(v) {
   view = v;
+  if (v === 'calendar') {
+    const [y, m] = currentDate.split('-').map(Number);
+    calMonth = { y, m };
+  }
   document.querySelectorAll('.rail-btn[data-view], #bottomNav .bn-btn, #viewSwitch .vs-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.view === v);
   });
@@ -1955,6 +2254,7 @@ function setView(v) {
   document.getElementById('view-customers').classList.toggle('hidden', v !== 'customers');
   document.getElementById('view-sites').classList.toggle('hidden', v !== 'sites');
   document.getElementById('view-chat').classList.toggle('hidden', v !== 'chat');
+  document.getElementById('view-calendar').classList.toggle('hidden', v !== 'calendar');
   if (v === 'chat' && !document.getElementById('chatLog').childElementCount) {
     chatAppend('bot', t('chatHello') + '\n' + t('chatExamples'));
   }
@@ -1969,6 +2269,7 @@ function renderAll() {
   else if (view === 'list') renderList();
   else if (view === 'sites') renderSites();
   else if (view === 'customers') renderCustomers();
+  else if (view === 'calendar') renderCalendar();
   /* chat はDOMを保持するため再描画しない */
 }
 
@@ -2098,6 +2399,60 @@ function init() {
 
   // 現在時刻ラインを1分ごとに更新
   setInterval(() => { if (view === 'timetable' && !drag) renderTimetable(); }, 60000);
+
+  // 予約一覧: 全期間検索・印刷
+  document.getElementById('listSearch').addEventListener('input', (e) => {
+    listFilter.q = e.target.value;
+    if (view === 'list') renderList();
+  });
+  document.getElementById('btnPrint').addEventListener('click', () => window.print());
+
+  // 未確認ネット予約バッジ → 一覧を「未確認」で絞り込み
+  document.getElementById('newBadge').addEventListener('click', () => {
+    listFilter = { q: '', status: 'new' };
+    setView('list');
+  });
+
+  // 月間カレンダー
+  document.getElementById('calPrev').addEventListener('click', () => shiftCalMonth(-1));
+  document.getElementById('calNext').addEventListener('click', () => shiftCalMonth(1));
+  document.getElementById('calToday').addEventListener('click', () => {
+    const [y, m] = todayStr().split('-').map(Number);
+    calMonth = { y, m };
+    renderCalendar();
+  });
+
+  // 予約フォーム: 電話番号から顧客情報を自動入力 / 複製
+  document.getElementById('fPhone').addEventListener('input', autofillFromPhone);
+  document.getElementById('fPhone').addEventListener('change', autofillFromPhone);
+  document.getElementById('btnResDup').addEventListener('click', duplicateReservation);
+
+  // 設定: 定休日・マスタ・バックアップ
+  document.getElementById('btnAddClosedDate').addEventListener('click', () => {
+    const inp = document.getElementById('sClosedDateInput');
+    if (inp.value && !closedDatesWork.includes(inp.value)) closedDatesWork.push(inp.value);
+    inp.value = '';
+    renderClosedSettings();
+  });
+  document.getElementById('btnAddCourseMaster').addEventListener('click', () => {
+    courseWork.push({ id: 'crs' + uid(), name: '' });
+    renderMasterRows('courseRows', courseWork);
+    const inputs = document.querySelectorAll('#courseRows input');
+    inputs[inputs.length - 1]?.focus();
+  });
+  document.getElementById('btnAddTagMaster').addEventListener('click', () => {
+    tagWork.push({ id: 'tag' + uid(), name: '' });
+    renderMasterRows('tagRows', tagWork);
+    const inputs = document.querySelectorAll('#tagRows input');
+    inputs[inputs.length - 1]?.focus();
+  });
+  document.getElementById('btnExportJson').addEventListener('click', exportJson);
+  document.getElementById('btnExportCsv').addEventListener('click', exportCsv);
+  document.getElementById('btnImportJson').addEventListener('click', () => document.getElementById('importFile').click());
+  document.getElementById('importFile').addEventListener('change', (e) => {
+    importJsonFile(e.target.files[0]);
+    e.target.value = '';
+  });
 
   renderAll();
 }
