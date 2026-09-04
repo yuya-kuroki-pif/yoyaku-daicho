@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- GitHub Pages などでリポジトリ直下が開かれたときに、アプリ本体（public/）へ転送する -->
+  <meta http-equiv="refresh" content="0; url=public/index.html">
+  <title>予約台帳 / Sổ đặt bàn</title>
+  <style>
+    body { font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; color: #1f2937; background: #f7f9fb; }
+    a { color: #2563eb; font-weight: 700; font-size: 18px; }
+  </style>
+</head>
+<body>
+  <a href="public/index.html">予約台帳を開く / Mở sổ đặt bàn</a>
+  <script>
+    // クエリ（?store=…）やハッシュを引き継いで転送
+    location.replace('public/index.html' + location.search + location.hash);
+  </script>
+</body>
+</html>
