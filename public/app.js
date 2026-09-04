@@ -63,6 +63,10 @@ function todayStr() {
 }
 function fmtTime(min) { return `${pad2(Math.floor(min / 60))}:${pad2(min % 60)}`; }
 function uid() { return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+/* 文字数の上限（保存データの肥大化・表示崩れの防止） */
+function lim(s, n) { return String(s ?? '').slice(0, n); }
+/* 予約サイトの色: 16進カラー以外は既定色に置き換え（style 属性への注入防止） */
+function safeColor(c) { return /^#[0-9a-f]{3,8}$/i.test(String(c || '')) ? c : '#9aa7af'; }
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => (
@@ -355,7 +359,7 @@ function blockNameHtml(r, visitMap) {
     : `<span class="chip-visit">${esc(t('firstVisit'))}</span>`;
   const courseIco = resHasCourse(r) ? '<span class="b-ico">🍴</span>' : '';
   const site = siteById(r.channel);
-  const dot = site ? `<span class="ch-dot" style="background:${esc(site.color)}"></span>` : '';
+  const dot = site ? `<span class="ch-dot" style="background:${safeColor(site.color)}"></span>` : '';
   const newChip = r.isNew ? '<span class="chip-new">NEW</span>' : '';
   return `${newChip}${dot}${esc(r.name)} <span>${esc(dict().fmtPax(pax))}</span> ${chip}${courseIco}`;
 }
@@ -1315,7 +1319,7 @@ function renderSites() {
     const card = document.createElement('div');
     card.className = 'site-card';
     card.innerHTML =
-      `<span class="site-color" style="background:${esc(s.color)}"></span>` +
+      `<span class="site-color" style="background:${safeColor(s.color)}"></span>` +
       `<div class="site-main">` +
         `<div class="site-name">${esc(s.name)}</div>` +
         `<div class="site-sub">${esc(t('linkedTables'))}: ${esc(tableNames(s.tableIds))}</div>` +
@@ -1373,7 +1377,7 @@ function renderInventory() {
     slots.map((s2) => `<th>${fmtTime(s2)}</th>`).join('') +
     '</tr></thead><tbody>';
   sites.forEach((s) => {
-    html += `<tr><th><span class="ch-dot" style="background:${esc(s.color)}"></span>${esc(s.name)}</th>`;
+    html += `<tr><th><span class="ch-dot" style="background:${safeColor(s.color)}"></span>${esc(s.name)}</th>`;
     slots.forEach((m2) => {
       const n = s.tableIds.filter((id) => tableById(id) && !busy(id, m2)).length;
       const cls = n === 0 ? 'full' : n === 1 ? 'low' : 'ok';
@@ -1472,8 +1476,9 @@ function closeSiteModal() {
 }
 
 function saveSite() {
-  const name = document.getElementById('sName').value.trim();
+  const name = lim(document.getElementById('sName').value.trim(), 60);
   if (!name) { alert(t('siteName')); return; }
+  if (!SITE_COLORS.includes(siteModalColor)) siteModalColor = SITE_COLORS[0];
   if (editingSiteId) {
     const s = siteById(editingSiteId);
     if (s) { s.name = name; s.color = siteModalColor; s.tableIds = [...siteModalTables]; }
@@ -1743,18 +1748,18 @@ function saveReservation() {
     resetTime: Number(document.getElementById('fReset').value) || 0,
     adults: Number(document.getElementById('fAdults').textContent),
     children: Number(document.getElementById('fChildren').textContent),
-    name,
-    kana: document.getElementById('fKana').value.trim(),
-    phone,
+    name: lim(name, 100),
+    kana: lim(document.getElementById('fKana').value.trim(), 100),
+    phone: lim(phone, 40),
     gender: Number(document.getElementById('fGender').value) || 0,
-    company: document.getElementById('fCompany').value.trim(),
-    reservationName: document.getElementById('fResName').value.trim(),
-    email: document.getElementById('fEmail').value.trim(),
+    company: lim(document.getElementById('fCompany').value.trim(), 100),
+    reservationName: lim(document.getElementById('fResName').value.trim(), 100),
+    email: lim(document.getElementById('fEmail').value.trim(), 200),
     purpose: document.getElementById('fPurpose').value ? Number(document.getElementById('fPurpose').value) : '',
     tableIds: [...modalTables],
     courses: modalCourses.filter((c) => c.courseId).map((c) => ({ courseId: c.courseId, quantity: Math.max(1, c.quantity || 1) })),
     tags: [...modalTags],
-    memo: document.getElementById('fMemo').value.trim(),
+    memo: lim(document.getElementById('fMemo').value.trim(), 2000),
     channel: document.getElementById('fChannel').value,
     status: modalStatus,
     walkIn: modalWalkIn,
@@ -2624,11 +2629,14 @@ function exportJson() {
 }
 function importJsonFile(file) {
   if (!file) return;
+  if (file.size > 10 * 1024 * 1024) { alert(t('importError')); return; }   // 10MB 超は拒否
   const reader = new FileReader();
   reader.onload = () => {
     try {
       const data = JSON.parse(reader.result);
-      if (!data || !Array.isArray(data.reservations) || !Array.isArray(data.tables) || !data.settings) throw new Error('invalid');
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('invalid');
+      if (!Array.isArray(data.reservations) || !Array.isArray(data.tables) || !data.settings || typeof data.settings !== 'object') throw new Error('invalid');
+      ['sites', 'courses', 'tags', 'combos'].forEach((k) => { if (data[k] != null && !Array.isArray(data[k])) throw new Error('invalid'); });
       if (!confirm(t('importConfirm'))) return;
       localStorage.setItem(dataKey(registry.currentId), JSON.stringify(data));
       load(); // 旧形式の移行処理も適用
@@ -2641,7 +2649,9 @@ function importJsonFile(file) {
   reader.readAsText(file);
 }
 function csvCell(v) {
-  const s = String(v ?? '');
+  let s = String(v ?? '');
+  // CSV/数式インジェクション対策: 先頭が = + - @ やタブの場合は先頭に ' を付けて数式として評価されないようにする
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 function exportCsv() {

@@ -151,7 +151,7 @@ const T = {
 };
 
 /* ---------- 状態 ---------- */
-let lang = (() => { try { return localStorage.getItem(LANG_KEY) || 'ja'; } catch (e) { return 'ja'; } })();
+let lang = (() => { try { return localStorage.getItem(LANG_KEY) === 'vi' ? 'vi' : 'ja'; } catch (e) { return 'ja'; } })();
 let view = (location.hash || '') === '#reserve' ? 'reserve' : 'store';   // 'store'（店舗ページ） | 'reserve'（予約画面）
 let tab = 'top';
 let mode = 'book';          // 予約タブ内: 'book' | 'lookup'
@@ -180,7 +180,9 @@ function fmtYmd(date) { const [y, m, d] = date.split('-').map(Number); return tr
 function genCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let s = '';
-  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  const rnd = new Uint32Array(6);
+  (window.crypto || window.msCrypto).getRandomValues(rnd);
+  for (let i = 0; i < 6; i++) s += chars[rnd[i] % chars.length];
   return s;
 }
 function totalPax() { return sel.adults + sel.children; }
@@ -315,22 +317,22 @@ function loadGoogle(st) {
       google.data = {
         rating: data.rating ?? null,
         count: data.userRatingCount ?? 0,
-        mapsUri: data.googleMapsUri || '',
+        mapsUri: safeUrl(data.googleMapsUri),
         info: googlePlaceToInfo(data, lang),   // 住所・電話・営業時間などの補完用
         reviews: (data.reviews || []).map((r) => ({
           author: r.authorAttribution?.displayName || '',
-          authorUri: r.authorAttribution?.uri || '',
-          photo: r.authorAttribution?.photoUri || '',
+          authorUri: safeUrl(r.authorAttribution?.uri),
+          photo: safeUrl(r.authorAttribution?.photoUri),
           rating: r.rating || 0,
           text: r.text?.text || r.originalText?.text || '',
           when: r.relativePublishTimeDescription || '',
-          uri: r.googleMapsUri || '',
+          uri: safeUrl(r.googleMapsUri),
         })),
         // 写真は投稿者の帰属表示（authorAttributions）付きで保持する
         photos: (data.photos || []).slice(0, MAX_GOOGLE_PHOTOS).map((p) => ({
           url: `https://places.googleapis.com/v1/${p.name}/media?maxWidthPx=900&key=${encodeURIComponent(key)}`,
           author: p.authorAttributions?.[0]?.displayName || '',
-          authorUri: p.authorAttributions?.[0]?.uri || '',
+          authorUri: safeUrl(p.authorAttributions?.[0]?.uri),
         })),
       };
       google.status = 'ok';
@@ -933,15 +935,15 @@ function infoStepHtml(st) {
   const purposes = I18N[lang].purposeOptions || [];
   const notes = settings(st).storeNote || t('defaultNotes');
   return `<div class="card plain"><h2>${esc(t('stepInfo'))}<span class="sub">${esc(t('requiredNote'))}</span></h2>` +
-    `<div class="field"><label>${esc(t('name'))}<span class="req">※</span></label><input type="text" id="fName" value="${esc(sel.name)}" autocomplete="name"></div>` +
-    `<div class="field"><label>${esc(t('kana'))}</label><input type="text" id="fKana" value="${esc(sel.kana)}"></div>` +
-    `<div class="field"><label>${esc(t('phone'))}<span class="req">※</span></label><input type="tel" id="fPhone" value="${esc(sel.phone)}" placeholder="090-0000-0000" autocomplete="tel"></div>` +
-    `<div class="field"><label>${esc(t('email'))}</label><input type="email" id="fEmail" value="${esc(sel.email)}" placeholder="example@email.com" autocomplete="email"></div>` +
+    `<div class="field"><label>${esc(t('name'))}<span class="req">※</span></label><input type="text" id="fName" value="${esc(sel.name)}" autocomplete="name" maxlength="100"></div>` +
+    `<div class="field"><label>${esc(t('kana'))}</label><input type="text" id="fKana" value="${esc(sel.kana)}" maxlength="100"></div>` +
+    `<div class="field"><label>${esc(t('phone'))}<span class="req">※</span></label><input type="tel" id="fPhone" value="${esc(sel.phone)}" placeholder="090-0000-0000" autocomplete="tel" maxlength="40"></div>` +
+    `<div class="field"><label>${esc(t('email'))}</label><input type="email" id="fEmail" value="${esc(sel.email)}" placeholder="example@email.com" autocomplete="email" maxlength="200"></div>` +
     `<div class="field"><label>${esc(t('childrenOf'))}</label><select id="fChildren">` +
       Array.from({ length: sel.adults }, (_, i) => i).map((n) => `<option value="${n}" ${n === sel.children ? 'selected' : ''}>${esc(tr().paxUnit(n))}</option>`).join('') + `</select></div>` +
     `<div class="field"><label>${esc(t('purpose'))}</label><select id="fPurpose"><option value="">${esc(t('purposeNone'))}</option>` +
       purposes.map((p, i) => `<option value="${i + 1}" ${String(sel.purpose) === String(i + 1) ? 'selected' : ''}>${esc(p)}</option>`).join('') + `</select></div>` +
-    `<div class="field"><label>${esc(t('memo'))}</label><textarea id="fMemo">${esc(sel.memo)}</textarea></div>` +
+    `<div class="field"><label>${esc(t('memo'))}</label><textarea id="fMemo" maxlength="1000">${esc(sel.memo)}</textarea></div>` +
     `<div class="notes"><b>${esc(t('notesHead'))}</b>\n${esc(notes)}</div>` +
     `<label class="agree"><input type="checkbox" id="fAgree" ${sel.agree ? 'checked' : ''}> ${esc(t('agree'))}</label>` +
     `<div class="msg" id="formMsg" hidden></div></div>` +
@@ -1141,15 +1143,15 @@ function submit() {
     end: d.start + DUR,
     adults: d.adults,
     children: d.children,
-    name: d.name,
-    kana: d.kana.trim(),
-    phone: d.phone,
-    email: d.email,
+    name: d.name.slice(0, 100),
+    kana: d.kana.trim().slice(0, 100),
+    phone: d.phone.slice(0, 40),
+    email: d.email.slice(0, 200),
     purpose: d.purpose ? Number(d.purpose) : '',
     tableIds: assign,
     courses: d.courses,
     tags: [],
-    memo: d.memo.trim(),
+    memo: d.memo.trim().slice(0, 1000),
     status: 'reserved',
     walkIn: false,
     channel: site.id,

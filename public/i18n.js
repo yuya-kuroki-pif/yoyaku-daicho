@@ -535,7 +535,7 @@ function googlePlaceToInfo(data, lang) {
   if (data.formattedAddress) info.storeAddress = data.formattedAddress;
   const wd = data.regularOpeningHours && data.regularOpeningHours.weekdayDescriptions;
   if (wd && wd.length) info.storeHours = wd.join(' / ');
-  if (data.websiteUri) info.storeWebsite = data.websiteUri;
+  if (/^https?:\/\//i.test(String(data.websiteUri || ''))) info.storeWebsite = data.websiteUri;   // http(s) 以外のスキームは捨てる
   if (data.priceRange && (data.priceRange.startPrice || data.priceRange.endPrice)) {
     // 例: 200,000〜400,000 VND（通貨は末尾に1回）
     const sp = data.priceRange.startPrice, ep = data.priceRange.endPrice;
