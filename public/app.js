@@ -11,6 +11,16 @@
 
 const LS_KEY = 'yoyaku-daicho-v1';
 const LS_REGISTRY = 'yoyaku-daicho-stores';   // 店舗一覧と表示中の店舗ID
+/* Google API キーは公開リポジトリに含めない（端末ごとにテーブル設定で入力する） */
+/* 最初の店舗の初期値（Robata Naru-Charcoal Grill / ハノイ）。店舗情報は設定画面で変更可 */
+const DEFAULT_STORE_INFO = {
+  storeName: 'Robata Naru-Charcoal Grill',
+  storeKana: 'ろばた なる',
+  storeGenre: '居酒屋・炉端焼き',
+  storePhone: '+84 333 995 532',
+  storeAddress: '36 Linh Lang, Ngọc Hà, Hà Nội 111000, Vietnam',
+  googlePlaceId: 'ChIJvXU5_t2rNTERUExSW6o5yiI',
+};
 let registry = null;                          // { stores: [{id, name}], currentId }
 const SLOT_MIN = 30;   // タイムテーブルの1マス（分）
 const SNAP_MIN = 15;   // ドラッグ時のスナップ単位（分）
@@ -101,7 +111,7 @@ function defaultState() {
     sitesV2: true,
     tablesV2: true,
     combos: [{ id: 'cb1', tableIds: ['t1', 't2'], max: 8 }],
-    settings: { lang: 'ja', openMin: 11 * 60, closeMin: 23 * 60, closedDays: [], closedDates: [] },
+    settings: { lang: 'ja', openMin: 11 * 60, closeMin: 23 * 60, closedDays: [], closedDates: [], googleApiKey: '', ...DEFAULT_STORE_INFO },
   };
 }
 /* コースマスタ（reservation_courses が参照） */
@@ -140,7 +150,7 @@ function loadRegistry() {
       localStorage.setItem(dataKey('st1'), legacy);
       localStorage.removeItem(LS_KEY);
     }
-    registry = { stores: [{ id: 'st1', name: name || '店舗1' }], currentId: 'st1' };
+    registry = { stores: [{ id: 'st1', name: name || (legacy ? '店舗1' : DEFAULT_STORE_INFO.storeName) }], currentId: 'st1' };
     saveRegistry();
   }
   if (!registry.stores.some((s) => s.id === registry.currentId)) registry.currentId = registry.stores[0].id;
@@ -163,6 +173,7 @@ function addStore() {
   // 新しい店舗は空の台帳（テーブル・サイト・コース等の初期設定のみ）で開始
   state = defaultState();
   state.reservations = [];
+  Object.keys(DEFAULT_STORE_INFO).forEach((k) => { state.settings[k] = ''; });
   state.settings.storeName = name;
   save();
   renderAll();
@@ -230,6 +241,13 @@ function load() {
       // 定休日・臨時休業日
       if (!state.settings.closedDays) { state.settings.closedDays = []; save(); }
       if (!state.settings.closedDates) { state.settings.closedDates = []; save(); }
+      // Google 連携の初期値（未設定のときだけ。意図的に空にした設定は保持）
+      if (state.settings.googlePlaceId === undefined && !state.settings.storeName) {
+        Object.assign(state.settings, DEFAULT_STORE_INFO);
+        const cs = currentStore();
+        if (cs && cs.name === '店舗1') { cs.name = DEFAULT_STORE_INFO.storeName; saveRegistry(); }
+        save();
+      }
       return;
     }
   } catch (e) { /* 壊れたデータは初期化 */ }
@@ -2479,6 +2497,52 @@ function renderClosedSettings() {
   });
 }
 
+/* ---------- 設定モーダル: 「Googleマップから取得」— 店名やリンクから店舗を検索して Place ID を設定 ---------- */
+function parseGoogleQuery(q) {
+  const s = String(q || '').trim();
+  const pid = s.match(/place_id[:=]([A-Za-z0-9_-]{10,})/) || s.match(/\b(ChIJ[A-Za-z0-9_-]{10,})\b/);
+  if (pid) return { placeId: pid[1] };
+  const m = s.match(/\/maps\/place\/([^/?#]+)/) || s.match(/[?&]q(?:uery)?=([^&#]+)/);
+  if (m) { try { return { text: decodeURIComponent(m[1].replace(/\+/g, ' ')) }; } catch (e) { return { text: m[1] }; } }
+  return { text: s };
+}
+async function findPlaceFromGoogle() {
+  const key = document.getElementById('sGoogleApiKey').value.trim();
+  const q = parseGoogleQuery(document.getElementById('sGoogleQuery').value);
+  const list = document.getElementById('googleCandidates');
+  if (!key) { alert(t('googleFindNeedKey')); return; }
+  if (q.placeId) { document.getElementById('sGooglePlaceId').value = q.placeId; list.classList.add('hidden'); await importStoreInfoFromGoogle(); return; }
+  if (!q.text) { alert(t('googleFindNeedQuery')); return; }
+  const btn = document.getElementById('btnGoogleFind');
+  btn.disabled = true;
+  try {
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress' },
+      body: JSON.stringify({ textQuery: q.text, languageCode: state.settings.lang || 'ja', maxResultCount: 5 }),
+    });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (err) { /* ignore */ }
+      throw new Error(msg);
+    }
+    const places = ((await res.json()).places || []).filter((p) => p.id);
+    if (!places.length) { alert(t('googleFindNone')); return; }
+    list.innerHTML = `<div class="cand-note">${esc(t('googleFindPick'))}</div>` + places.map((p) =>
+      `<button type="button" class="cand" data-pid="${esc(p.id)}"><b>${esc(p.displayName ? p.displayName.text : p.id)}</b><span>${esc(p.formattedAddress || '')}</span></button>`).join('');
+    list.classList.remove('hidden');
+    list.querySelectorAll('.cand').forEach((b) => b.addEventListener('click', async () => {
+      document.getElementById('sGooglePlaceId').value = b.dataset.pid;
+      list.classList.add('hidden');
+      await importStoreInfoFromGoogle();
+    }));
+  } catch (e) {
+    alert(`${t('googleImportError')} ${e.message || ''}`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 /* ---------- 設定モーダル: Google マップから店舗情報を取り込む（空欄のみ埋める。保存はユーザーが確認して行う） ---------- */
 async function importStoreInfoFromGoogle() {
   const pid = document.getElementById('sGooglePlaceId').value.trim();
@@ -2649,6 +2713,8 @@ function init() {
     if (e.target.value === '__add') addStore(); else switchStore(e.target.value);
   });
   document.getElementById('btnGoogleImport').addEventListener('click', importStoreInfoFromGoogle);
+  document.getElementById('btnGoogleFind').addEventListener('click', findPlaceFromGoogle);
+  document.getElementById('sGoogleQuery').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); findPlaceFromGoogle(); } });
   document.getElementById('btnAddStore').addEventListener('click', () => { document.getElementById('settingsModal').classList.add('hidden'); addStore(); });
   document.getElementById('btnDeleteStore').addEventListener('click', deleteStore);
 
