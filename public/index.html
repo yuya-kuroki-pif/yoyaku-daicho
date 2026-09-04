@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=26">
+  <link rel="stylesheet" href="style.css?v=30">
 </head>
 <body>
   <!-- dinii風 細線SVGアイコン定義 -->
@@ -97,6 +97,7 @@
       </nav>
 
       <div class="topbar-right">
+        <select id="storeSwitch" class="store-switch" title="店舗"></select>
         <button id="newBadge" class="new-badge hidden"></button>
         <span class="day-summary" id="daySummary"></span>
         <button id="btnChatPhone" class="icon-btn phone-only"><svg class="ic"><use href="#ic-chat"/></svg></button>
@@ -156,6 +157,8 @@
       <section id="view-chat" class="view hidden">
         <div class="chat-log" id="chatLog"></div>
         <div class="chat-inputbar">
+          <button class="icon-btn chat-attach" id="chatAttach" title="📷">📷</button>
+          <input type="file" id="chatFile" accept="image/*" multiple class="hidden">
           <input type="text" id="chatInput" data-i18n-placeholder="chatPlaceholder" autocomplete="off">
           <button class="btn primary" id="chatSend" data-i18n="chatSend"></button>
         </div>
@@ -314,6 +317,13 @@
         <button class="icon-btn" id="btnSetClose">✕</button>
       </div>
       <div class="modal-body">
+        <h3 class="combo-heading" style="margin-top:0" data-i18n="storeMgmtHeading"></h3>
+        <p class="combo-note" data-i18n="storeMgmtNote"></p>
+        <div class="backup-actions">
+          <button type="button" class="btn ghost" id="btnAddStore">＋ <span data-i18n="addStoreBtn2"></span></button>
+          <button type="button" class="btn danger" id="btnDeleteStore"><span data-i18n="deleteStoreBtn"></span></button>
+        </div>
+        <h3 class="combo-heading" data-i18n="hoursHeading"></h3>
         <div class="form-grid">
           <div class="field">
             <label data-i18n="openTime"></label>
@@ -350,7 +360,46 @@
           <div class="table-chips" id="sClosedDates"></div>
         </div>
 
+        <h3 class="combo-heading" data-i18n="storeHeading"></h3>
+        <p class="combo-note" data-i18n="storeInfoNote"></p>
+        <div class="form-grid">
+          <div class="field span2"><label data-i18n="storeNameLabel"></label><input type="text" id="sStoreName"></div>
+          <div class="field"><label data-i18n="storeKanaLabel"></label><input type="text" id="sStoreKana" data-i18n-placeholder="storeKanaPlaceholder"></div>
+          <div class="field"><label data-i18n="storeGenreLabel"></label><input type="text" id="sStoreGenre" data-i18n-placeholder="storeGenrePlaceholder"></div>
+          <div class="field"><label data-i18n="storePhoneLabel"></label><input type="tel" id="sStorePhone"></div>
+          <div class="field span2"><label data-i18n="storeAddressLabel"></label><input type="text" id="sStoreAddress"></div>
+          <div class="field"><label data-i18n="storeAccessLabel"></label><input type="text" id="sStoreAccess" data-i18n-placeholder="storeAccessPlaceholder"></div>
+          <div class="field"><label data-i18n="storeHoursLabel"></label><input type="text" id="sStoreHours" data-i18n-placeholder="storeHoursPlaceholder"></div>
+          <div class="field"><label data-i18n="storeBudgetLabel"></label><input type="text" id="sStoreBudget" data-i18n-placeholder="storeBudgetPlaceholder"></div>
+          <div class="field"><label data-i18n="storeBudgetLunchLabel"></label><input type="text" id="sStoreBudgetLunch" data-i18n-placeholder="storeBudgetLunchPlaceholder"></div>
+          <div class="field span3"><label data-i18n="storePaymentLabel"></label><input type="text" id="sStorePayment" data-i18n-placeholder="storePaymentPlaceholder"></div>
+          <div class="field span3"><label data-i18n="storeCatchLabel"></label><input type="text" id="sStoreCatch" data-i18n-placeholder="storeCatchPlaceholder"></div>
+          <div class="field span3"><label data-i18n="storeDescLabel"></label><textarea id="sStoreDescription" rows="4"></textarea></div>
+          <div class="field span3"><label data-i18n="storePhotosLabel"></label><textarea id="sStorePhotos" rows="3" data-i18n-placeholder="storePhotosPlaceholder"></textarea></div>
+          <div class="field span3"><label data-i18n="storeNoticeLabel"></label><textarea id="sStoreNote" rows="3" data-i18n-placeholder="storeNoticePlaceholder"></textarea></div>
+        </div>
+
+        <h3 class="combo-heading" data-i18n="storeDetailHeading"></h3>
+        <p class="combo-note" data-i18n="storeDetailNote"></p>
+        <div class="form-grid" id="storeExtraFields"></div>
+
+        <h3 class="combo-heading" data-i18n="aiHeading"></h3>
+        <p class="combo-note" data-i18n="aiNote"></p>
+        <div class="form-grid">
+          <div class="field span2"><label data-i18n="aiKeyLabel"></label><input type="text" id="sClaudeApiKey" placeholder="sk-ant-…" autocomplete="off"></div>
+        </div>
+
+        <h3 class="combo-heading" data-i18n="googleHeading"></h3>
+        <p class="combo-note" data-i18n="googleNote"></p>
+        <div class="form-grid">
+          <div class="field span2"><label data-i18n="googlePlaceIdLabel"></label><input type="text" id="sGooglePlaceId" placeholder="ChIJ…"></div>
+          <div class="field"><label data-i18n="googleApiKeyLabel"></label><input type="text" id="sGoogleApiKey" placeholder="AIza…" autocomplete="off"></div>
+          <div class="field span3"><a class="ext-link" href="https://developers.google.com/maps/documentation/places/web-service/place-id" target="_blank" rel="noopener" data-i18n="googleHelpLink"></a></div>
+        </div>
+
         <h3 class="combo-heading" data-i18n="coursesHeading"></h3>
+        <p class="combo-note" data-i18n="coursesNote"></p>
+        <div class="course-head"><span data-i18n="courseNameLabel"></span><span data-i18n="coursePriceLabel"></span><span></span></div>
         <div id="courseRows"></div>
         <button class="btn ghost full" id="btnAddCourseMaster"><svg class="ic"><use href="#ic-plus"/></svg> <span data-i18n="addCourseMaster"></span></button>
 
@@ -431,7 +480,7 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=26"></script>
-  <script src="app.js?v=26"></script>
+  <script src="i18n.js?v=31"></script>
+  <script src="app.js?v=31"></script>
 </body>
 </html>

@@ -740,3 +740,29 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
   .res-card { break-inside: avoid; box-shadow: none; }
   .res-card .btn { display: none !important; }
 }
+
+/* コースマスタ（名称・料金・説明） */
+.course-head { display: grid; grid-template-columns: 1fr 120px 40px; gap: 10px; font-size: 12.5px; color: var(--muted); font-weight: 600; margin: 8px 0 6px; }
+.course-master-row { display: grid; grid-template-columns: 1fr 120px 40px; gap: 6px 10px; margin-bottom: 10px; }
+.course-master-row input { border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; font-size: 16px; min-height: 46px; min-width: 0; }
+.course-master-row .cr-desc { grid-column: 1 / -1; font-size: 14px; min-height: 40px; }
+.course-master-row .icon-btn { color: var(--red); }
+.ext-link { font-size: 13px; color: var(--blue); font-weight: 600; }
+
+/* 店舗切替セレクト */
+.store-switch { border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; font-size: 13.5px; min-height: 40px; background: #fff; max-width: 200px; font-weight: 700; color: var(--text); cursor: pointer; }
+@media (max-width: 700px) { .store-switch { max-width: 120px; font-size: 12px; min-height: 38px; padding: 6px 6px; } }
+
+/* チャット: 画像貼り付け・読み取り結果 */
+.chat-attach { width: 44px; height: 44px; border: 1px solid var(--line-strong); border-radius: 10px; background: #fff; font-size: 20px; cursor: pointer; flex: none; }
+.chat-img { max-width: min(320px, 70vw); max-height: 360px; border-radius: 10px; display: block; border: 1px solid rgba(255,255,255,.4); }
+.chat-msg.user .chat-img + div { margin-top: 6px; }
+#view-chat.dragover .chat-log { outline: 3px dashed var(--blue); outline-offset: -8px; background: var(--blue-soft); }
+.ai-card { min-width: 260px; }
+.ai-title { font-weight: 800; color: var(--blue); margin-bottom: 6px; }
+.ai-table { border-collapse: collapse; width: 100%; font-size: 13.5px; margin-bottom: 8px; }
+.ai-table th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; padding: 4px 10px 4px 0; white-space: nowrap; width: 5.5em; vertical-align: top; }
+.ai-table td { padding: 4px 0; word-break: break-word; }
+.ai-missing { font-size: 12.5px; color: var(--red); font-weight: 700; margin-bottom: 6px; }
+.ai-notes { font-size: 12px; color: var(--muted); margin-bottom: 8px; line-height: 1.6; }
+.chat-msg.bot .ai-open { width: 100%; justify-content: center; }

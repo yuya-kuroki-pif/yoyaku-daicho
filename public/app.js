@@ -10,6 +10,8 @@
  */
 
 const LS_KEY = 'yoyaku-daicho-v1';
+const LS_REGISTRY = 'yoyaku-daicho-stores';   // 店舗一覧と表示中の店舗ID
+let registry = null;                          // { stores: [{id, name}], currentId }
 const SLOT_MIN = 30;   // タイムテーブルの1マス（分）
 const SNAP_MIN = 15;   // ドラッグ時のスナップ単位（分）
 const LONG_PRESS_MS = 400;
@@ -36,6 +38,12 @@ let courseWork = [];                          // 設定モーダル内のコー�
 let tagWork = [];                             // 設定モーダル内のタグマスタ作業コピー
 let closedDaysWork = new Set();               // 設定モーダル内の定休日（曜日）
 let closedDatesWork = [];                     // 設定モーダル内の臨時休業日
+/* 予約サイトの店舗情報に使うテキスト設定（STORE_EXTRA_KEYS は入力欄を動的生成） */
+const STORE_EXTRA_KEYS = ['storePrivateRoom', 'storeCharter', 'storeSmoking', 'storeParking', 'storeFacilities', 'storeDrink', 'storeFood',
+  'storeScene', 'storeService', 'storeKids', 'storeWebsite', 'storeSns', 'storeOpenDate', 'storeRemarks'];
+const STORE_TEXT_KEYS = ['storeKana', 'storeGenre', 'storeAccess', 'storeHours', 'storeBudget', 'storeBudgetLunch', 'storePayment', 'storeCatch',
+  'storeDescription', 'storePhotos', 'googlePlaceId', 'googleApiKey', 'claudeApiKey', ...STORE_EXTRA_KEYS];
+const settingInputId = (k) => 's' + k.charAt(0).toUpperCase() + k.slice(1);
 
 /* ---------- helpers ---------- */
 function pad2(n) { return String(n).padStart(2, '0'); }
@@ -117,9 +125,70 @@ function defaultSites() {
   ];
 }
 function ownSite() { return (state.sites || []).find((s) => s.own); }
+/* ---------- 店舗の切替（店舗ごとに台帳データを分離して保存） ---------- */
+function dataKey(id) { return `${LS_KEY}:${id}`; }
+function saveRegistry() { localStorage.setItem(LS_REGISTRY, JSON.stringify(registry)); }
+function currentStore() { return registry.stores.find((s) => s.id === registry.currentId) || registry.stores[0]; }
+function loadRegistry() {
+  try { registry = JSON.parse(localStorage.getItem(LS_REGISTRY)); } catch (e) { registry = null; }
+  if (!registry || !Array.isArray(registry.stores) || !registry.stores.length) {
+    // 初回: 旧形式（単一店舗）のデータがあれば店舗 st1 として引き継ぐ
+    const legacy = localStorage.getItem(LS_KEY);
+    let name = '';
+    if (legacy) {
+      try { name = (JSON.parse(legacy).settings || {}).storeName || ''; } catch (e) { /* ignore */ }
+      localStorage.setItem(dataKey('st1'), legacy);
+      localStorage.removeItem(LS_KEY);
+    }
+    registry = { stores: [{ id: 'st1', name: name || '店舗1' }], currentId: 'st1' };
+    saveRegistry();
+  }
+  if (!registry.stores.some((s) => s.id === registry.currentId)) registry.currentId = registry.stores[0].id;
+}
+function switchStore(id) {
+  if (!registry.stores.some((s) => s.id === id)) return;
+  registry.currentId = id;
+  saveRegistry();
+  load();
+  renderAll();
+}
+function addStore() {
+  const input = prompt(t('addStorePrompt'), '');
+  if (input == null) { renderStoreSwitch(); return; }
+  const name = input.trim() || t('newStoreDefault');
+  const id = 's' + Date.now().toString(36);
+  registry.stores.push({ id, name });
+  registry.currentId = id;
+  saveRegistry();
+  // 新しい店舗は空の台帳（テーブル・サイト・コース等の初期設定のみ）で開始
+  state = defaultState();
+  state.reservations = [];
+  state.settings.storeName = name;
+  save();
+  renderAll();
+}
+function deleteStore() {
+  if (registry.stores.length <= 1) { alert(t('lastStoreWarn')); return; }
+  const cur = currentStore();
+  if (!confirm(t('deleteStoreConfirm').replace('{name}', cur.name))) return;
+  localStorage.removeItem(dataKey(cur.id));
+  registry.stores = registry.stores.filter((s) => s.id !== cur.id);
+  registry.currentId = registry.stores[0].id;
+  saveRegistry();
+  document.getElementById('settingsModal').classList.add('hidden');
+  load();
+  renderAll();
+}
+function renderStoreSwitch() {
+  const sel = document.getElementById('storeSwitch');
+  sel.innerHTML = registry.stores.map((s) =>
+    `<option value="${esc(s.id)}" ${s.id === registry.currentId ? 'selected' : ''}>${esc(s.name)}</option>`).join('') +
+    `<option value="__add">${esc(t('addStoreBtn'))}</option>`;
+}
+
 function load() {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(dataKey(registry.currentId));
     if (raw) {
       state = JSON.parse(raw);
       // 旧データの移行
@@ -167,7 +236,7 @@ function load() {
   state = defaultState();
   save();
 }
-function save() { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+function save() { localStorage.setItem(dataKey(registry.currentId), JSON.stringify(state)); }
 
 /* ---------- 定休日・顧客照合・席数チェックの共通ヘルパー ---------- */
 function isClosedDate(date) {
@@ -772,7 +841,7 @@ function renderList() {
       `<div class="rc-time">${global ? `<small class="rc-date">${esc(fmtYmd(r.date))}</small>` : ''}${fmtTime(r.start)}<small>${fmtTime(r.start + r.duration)}</small></div>` +
       `<div class="rc-main">` +
         `<div class="rc-name">${blockNameHtml(r, visitMap)}</div>` +
-        `<div class="rc-sub">${esc(tableNames(r.tableIds))}${site ? '　🌐 ' + esc(site.name) : ''}${r.phone ? '　📞 ' + esc(r.phone) : ''}${resHasCourse(r) ? '　🍴 ' + esc(resCourseText(r)) : ''}${r.memo ? '　📝 ' + esc(r.memo) : ''}</div>` +
+        `<div class="rc-sub">${esc(tableNames(r.tableIds))}${site ? '　🌐 ' + esc(site.name) : ''}${r.phone ? '　📞 ' + esc(r.phone) : ''}${r.code ? '　🔖 ' + esc(r.code) : ''}${resHasCourse(r) ? '　🍴 ' + esc(resCourseText(r)) : ''}${r.memo ? '　📝 ' + esc(r.memo) : ''}</div>` +
       `</div>` +
       `<div class="rc-actions">${quick}<span class="status-chip ${r.status}">${esc(statusLabel(r.status))}</span></div>`;
     card.addEventListener('click', () => openResModal(r.id));
@@ -1202,7 +1271,8 @@ function bookingUrl(siteId) {
   const base = location.protocol === 'file:'
     ? location.href.replace(/index\.html.*$/, '') + 'booking.html'
     : `${location.protocol}//${location.host}/booking.html`;
-  return siteId ? `${base}?site=${encodeURIComponent(siteId)}` : base;
+  const q = `store=${encodeURIComponent(registry.currentId)}` + (siteId ? `&site=${encodeURIComponent(siteId)}` : '');
+  return `${base}?${q}`;
 }
 
 function copyText(txt) {
@@ -1520,8 +1590,8 @@ function openResModal(resId, prefill = {}) {
   fillTimeSelects();
 
   document.getElementById('resModalTitle').textContent =
-    (r ? t('editResTitle') : (modalWalkIn ? t('walkIn') : t('newResTitle'))) + (r && r.isNew ? '　🆕' : '');
-  document.getElementById('fDate').value = r ? r.date : currentDate;
+    (r ? t('editResTitle') : (modalWalkIn ? t('walkIn') : t('newResTitle'))) + (r && r.isNew ? '　🆕' : '') + (r && r.code ? `　#${r.code}` : '');
+  document.getElementById('fDate').value = r ? r.date : (prefill.date || currentDate);
 
   const { openMin, closeMin } = state.settings;
   let start = r ? r.start : (prefill.start ?? defaultStart());
@@ -1732,8 +1802,17 @@ function openSettingsModal() {
   // コース・タグのマスタ（作業コピー）
   courseWork = (state.courses || []).map((c) => ({ ...c }));
   tagWork = (state.tags || []).map((c) => ({ ...c }));
-  renderMasterRows('courseRows', courseWork);
+  renderCourseRows();
   renderMasterRows('tagRows', tagWork);
+  // 店舗情報（予約サイトに表示）
+  document.getElementById('sStoreName').value = state.settings.storeName || '';
+  document.getElementById('sStorePhone').value = state.settings.storePhone || '';
+  document.getElementById('sStoreAddress').value = state.settings.storeAddress || '';
+  document.getElementById('sStoreNote').value = state.settings.storeNote || '';
+  // 店舗詳細（任意項目）の入力欄を生成してから値を反映
+  document.getElementById('storeExtraFields').innerHTML = STORE_EXTRA_KEYS.map((k) =>
+    `<div class="field"><label>${esc(t('storeExtraLabels')[k] || k)}</label><input type="text" id="${settingInputId(k)}"></div>`).join('');
+  STORE_TEXT_KEYS.forEach((k) => { document.getElementById(settingInputId(k)).value = state.settings[k] || ''; });
 
   document.getElementById('settingsModal').classList.remove('hidden');
 }
@@ -1822,12 +1901,241 @@ function saveSettings() {
   // 定休日・臨時休業日
   state.settings.closedDays = [...closedDaysWork].sort((a, b) => a - b);
   state.settings.closedDates = [...new Set(closedDatesWork)].sort();
+  // 店舗情報
+  state.settings.storeName = document.getElementById('sStoreName').value.trim();
+  if (state.settings.storeName) { currentStore().name = state.settings.storeName; saveRegistry(); }
+  state.settings.storePhone = document.getElementById('sStorePhone').value.trim();
+  state.settings.storeAddress = document.getElementById('sStoreAddress').value.trim();
+  state.settings.storeNote = document.getElementById('sStoreNote').value.trim();
+  STORE_TEXT_KEYS.forEach((k) => { state.settings[k] = document.getElementById(settingInputId(k)).value.trim(); });
   // コース・タグのマスタ（空名は除外）
-  state.courses = courseWork.filter((c) => c.name.trim()).map((c) => ({ id: c.id, name: c.name.trim() }));
+  state.courses = courseWork.filter((c) => c.name.trim()).map((c) => ({ id: c.id, name: c.name.trim(), price: (c.price || '').trim(), desc: (c.desc || '').trim() }));
   state.tags = tagWork.filter((c) => c.name.trim()).map((c) => ({ id: c.id, name: c.name.trim() }));
   save();
   document.getElementById('settingsModal').classList.add('hidden');
   renderAll();
+}
+
+/* ---------- チャットへの画像貼り付け（DMのスクリーンショット → 予約内容の読み取り） ----------
+ * Claude の Messages API（画像入力）で、スクリーンショットから日時・人数・お名前・電話番号・コース・ご要望を抽出し、
+ * 予約フォームに反映して担当者が確認・登録する。API キーは店舗設定に保存（ブラウザから直接呼び出し）。 */
+const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
+const CLAUDE_MODEL = 'claude-opus-5';
+const MAX_IMAGE_PX = 1600;   // 送信前に長辺を縮小（トークン節約）
+
+function chatAppendNode(role, node) {
+  const log = document.getElementById('chatLog');
+  const div = document.createElement('div');
+  div.className = 'chat-msg ' + role;
+  div.appendChild(node);
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  return div;
+}
+
+/* 画像ファイルを縮小した JPEG の dataURL にする */
+function fileToJpegDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, MAX_IMAGE_PX / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale);
+      c.height = Math.round(img.height * scale);
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image')); };
+    img.src = url;
+  });
+}
+
+/* 抽出 JSON のスキーマ（構造化出力） */
+const EXTRACT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    found: { type: 'boolean' },
+    date: { type: ['string', 'null'] },
+    time: { type: ['string', 'null'] },
+    adults: { type: ['integer', 'null'] },
+    children: { type: ['integer', 'null'] },
+    name: { type: ['string', 'null'] },
+    kana: { type: ['string', 'null'] },
+    phone: { type: ['string', 'null'] },
+    course: { type: ['string', 'null'] },
+    memo: { type: ['string', 'null'] },
+    channel: { type: ['string', 'null'] },
+    missing: { type: 'array', items: { type: 'string' } },
+    notes: { type: 'string' },
+  },
+  required: ['found', 'date', 'time', 'adults', 'children', 'name', 'kana', 'phone', 'course', 'memo', 'channel', 'missing', 'notes'],
+};
+
+function extractSystemPrompt() {
+  const today = todayStr();
+  const wd = dict().weekdays[new Date().getDay()];
+  const courses = (state.courses || []).map((c) => c.name).join(' / ') || 'なし';
+  return `あなたは飲食店「${state.settings.storeName || ''}」の予約台帳アシスタントです。` +
+    `お客様とのDM（Instagram・LINE・メール等）のスクリーンショットから、予約に必要な情報を読み取り、指定のJSONだけを返してください。\n` +
+    `今日は ${today}（${wd}曜日）です。「明日」「来週金曜」などの相対表現は今日を基準に YYYY-MM-DD に変換してください。年が書かれていない日付は、今日以降で最も近い日付にしてください。\n` +
+    `営業時間は ${fmtTime(state.settings.openMin)}〜${fmtTime(state.settings.closeMin)}。時間は 24時間表記の HH:MM（例 19:00）。「夜7時」は 19:00 です。\n` +
+    `人数は大人と子供に分け、区別が無ければ全員を adults にしてください。コースは店舗のコース名（${courses}）に一致する場合のみその名前を、無ければ null。\n` +
+    `memo にはアレルギー・席の希望・お祝い等の要望を短くまとめ、channel には DM の媒体名（Instagram / LINE / メール 等、不明なら null）。\n` +
+    `読み取れない項目は null にし、missing に項目名（date/time/adults/name/phone）を列挙。notes には判断の根拠や不確かな点を日本語で1〜2文。\n` +
+    `予約に関する情報が含まれない画像なら found を false にしてください。`;
+}
+
+async function callClaudeExtract(dataUrl, hintText, withSchema) {
+  const key = (state.settings.claudeApiKey || '').trim();
+  const base64 = dataUrl.split(',')[1];
+  const body = {
+    model: CLAUDE_MODEL,
+    max_tokens: 2048,
+    fallbacks: 'default',
+    system: extractSystemPrompt(),
+    output_config: { effort: 'medium' },
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+        { type: 'text', text: (hintText ? `補足: ${hintText}\n` : '') + 'このスクリーンショットから予約情報を読み取って、JSONで返してください。' },
+      ],
+    }],
+  };
+  if (withSchema) body.output_config.format = { type: 'json_schema', schema: EXTRACT_SCHEMA };
+  const res = await fetch(CLAUDE_API_URL, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'server-side-fallback-2026-07-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (err) { /* ignore */ }
+    const error = new Error(msg);
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/* スクリーンショット → 予約情報（構造化出力が使えない環境では本文のJSONを解析） */
+async function extractReservationFromImage(dataUrl, hintText) {
+  let data;
+  try {
+    data = await callClaudeExtract(dataUrl, hintText, true);
+  } catch (e) {
+    if (e.status === 400) data = await callClaudeExtract(dataUrl, hintText, false);
+    else throw e;
+  }
+  if (data.stop_reason === 'refusal') throw new Error(t('aiRefused'));
+  const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error(t('aiNoJson'));
+  return JSON.parse(m[0]);
+}
+
+/* 抽出結果を予約フォームの初期値に変換 */
+function extractionToPrefill(info) {
+  const [h, mi] = String(info.time || '').split(':').map(Number);
+  const start = Number.isFinite(h) ? clamp(h * 60 + (mi || 0), state.settings.openMin, state.settings.closeMin - 15) : undefined;
+  const course = info.course ? (state.courses || []).find((c) => c.name === info.course || c.name.includes(info.course) || info.course.includes(c.name)) : null;
+  const adults = Math.max(1, Number(info.adults) || 0) || 2;
+  const ch = String(info.channel || '').toLowerCase();
+  const site = ch ? (state.sites || []).find((s) => s.name.toLowerCase().includes(ch) || ch.includes(s.name.toLowerCase())) : null;
+  return {
+    date: /^\d{4}-\d{2}-\d{2}$/.test(info.date || '') ? info.date : undefined,
+    start,
+    adults,
+    channel: site ? site.id : '',
+    copy: {
+      name: info.name || '',
+      kana: info.kana || '',
+      phone: info.phone || '',
+      memo: [info.memo || '', info.channel ? `（${info.channel} のDMより）` : ''].filter(Boolean).join(' '),
+      adults,
+      children: Math.max(0, Number(info.children) || 0),
+      courses: course ? [{ courseId: course.id, quantity: adults + (Number(info.children) || 0) }] : [],
+      channel: site ? site.id : '',
+      tags: [],
+      resetTime: 0,
+      hasTimeLimit: false,
+    },
+  };
+}
+
+function renderExtraction(info, hintText) {
+  const card = document.createElement('div');
+  card.className = 'ai-card';
+  if (!info || info.found === false) {
+    card.innerHTML = `<div class="ai-title">${esc(t('aiResult'))}</div><div>${esc(t('aiNotFound'))}</div>` +
+      (info && info.notes ? `<div class="ai-notes">${esc(info.notes)}</div>` : '');
+    chatAppendNode('bot', card);
+    return;
+  }
+  const pax = `${info.adults != null ? dict().fmtPax(info.adults) : '—'}${info.children ? `（${t('children')} ${info.children}）` : ''}`;
+  const rows = [
+    [t('date'), info.date ? fmtYmd(info.date) : '—'],
+    [t('startTime'), info.time || '—'],
+    [t('adults'), pax],
+    [t('name'), info.name || '—'],
+    [t('phone'), info.phone || '—'],
+    [t('course'), info.course || '—'],
+    [t('memo'), info.memo || '—'],
+    [t('channel'), info.channel || '—'],
+  ];
+  const missing = (info.missing || []).map((k) => ({ date: t('date'), time: t('startTime'), adults: t('adults'), name: t('name'), phone: t('phone') }[k] || k));
+  card.innerHTML =
+    `<div class="ai-title">📋 ${esc(t('aiResult'))}</div>` +
+    `<table class="ai-table">${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>` +
+    (missing.length ? `<div class="ai-missing">⚠ ${esc(t('aiMissing'))}: ${esc(missing.join('・'))}</div>` : '') +
+    (info.notes ? `<div class="ai-notes">${esc(info.notes)}</div>` : '') +
+    `<button type="button" class="btn primary small ai-open">${esc(t('aiOpenForm'))}</button>`;
+  card.querySelector('.ai-open').addEventListener('click', () => {
+    const p = extractionToPrefill(info);
+    if (p.date) { currentDate = p.date; }
+    openResModal(null, p);
+  });
+  chatAppendNode('bot', card);
+}
+
+/* 画像の受け取り（添付ボタン・貼り付け・ドロップ共通） */
+async function chatHandleImages(files, hintText) {
+  const list = [...files].filter((f) => f && f.type && f.type.startsWith('image/')).slice(0, 3);
+  if (!list.length) return;
+  for (const file of list) {
+    let dataUrl;
+    try { dataUrl = await fileToJpegDataUrl(file); } catch (e) { chatAppend('bot', t('aiError') + ' ' + t('aiBadImage')); continue; }
+    const img = document.createElement('img');
+    img.className = 'chat-img';
+    img.src = dataUrl;
+    img.alt = 'screenshot';
+    const wrap = document.createElement('div');
+    wrap.appendChild(img);
+    if (hintText) { const p = document.createElement('div'); p.textContent = hintText; wrap.appendChild(p); }
+    chatAppendNode('user', wrap);
+
+    if (!(state.settings.claudeApiKey || '').trim()) { chatAppend('bot', t('aiNeedKey')); continue; }
+    const waiting = chatAppend('bot', t('aiReading'));
+    try {
+      const info = await extractReservationFromImage(dataUrl, hintText);
+      waiting.remove();
+      renderExtraction(info, hintText);
+    } catch (e) {
+      waiting.textContent = `${t('aiError')} ${e.message || ''}`;
+    }
+  }
 }
 
 /* ---------- チャット操作（ルールベースの日本語/ベトナム語コマンド解析） ---------- */
@@ -1838,6 +2146,7 @@ function chatAppend(role, text) {
   div.textContent = text;
   log.appendChild(div);
   log.scrollTop = log.scrollHeight;
+  return div;
 }
 
 function chatOffsetDate(days) {
@@ -2172,6 +2481,25 @@ function renderClosedSettings() {
 }
 
 /* ---------- 設定モーダル: コース・タグのマスタ編集 ---------- */
+/* コースマスタ（名称・料金・説明。予約サイトのコース一覧に表示） */
+function renderCourseRows() {
+  const wrap = document.getElementById('courseRows');
+  wrap.innerHTML = '';
+  courseWork.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'course-master-row';
+    row.innerHTML =
+      `<input type="text" class="cr-name" value="${esc(c.name)}">` +
+      `<input type="text" class="cr-price" value="${esc(c.price || '')}" placeholder="${esc(t('coursePricePlaceholder'))}">` +
+      `<button type="button" class="icon-btn">🗑</button>` +
+      `<input type="text" class="cr-desc" value="${esc(c.desc || '')}" placeholder="${esc(t('courseDescPlaceholder'))}">`;
+    row.querySelector('.cr-name').addEventListener('input', (e) => { c.name = e.target.value; });
+    row.querySelector('.cr-price').addEventListener('input', (e) => { c.price = e.target.value; });
+    row.querySelector('.cr-desc').addEventListener('input', (e) => { c.desc = e.target.value; });
+    row.querySelector('.icon-btn').addEventListener('click', () => { courseWork.splice(i, 1); renderCourseRows(); });
+    wrap.appendChild(row);
+  });
+}
 function renderMasterRows(wrapId, list) {
   const wrap = document.getElementById(wrapId);
   wrap.innerHTML = '';
@@ -2208,7 +2536,7 @@ function importJsonFile(file) {
       const data = JSON.parse(reader.result);
       if (!data || !Array.isArray(data.reservations) || !Array.isArray(data.tables) || !data.settings) throw new Error('invalid');
       if (!confirm(t('importConfirm'))) return;
-      localStorage.setItem(LS_KEY, JSON.stringify(data));
+      localStorage.setItem(dataKey(registry.currentId), JSON.stringify(data));
       load(); // 旧形式の移行処理も適用
       document.getElementById('settingsModal').classList.add('hidden');
       renderAll();
@@ -2264,6 +2592,7 @@ function setView(v) {
 function renderAll() {
   closeCellPopover();
   applyStaticI18n();
+  renderStoreSwitch();
   renderDateBar();
   if (view === 'timetable') renderTimetable();
   else if (view === 'list') renderList();
@@ -2282,7 +2611,15 @@ function shiftDate(days) {
 
 /* ---------- init ---------- */
 function init() {
+  loadRegistry();
   load();
+
+  // 店舗の切替・追加
+  document.getElementById('storeSwitch').addEventListener('change', (e) => {
+    if (e.target.value === '__add') addStore(); else switchStore(e.target.value);
+  });
+  document.getElementById('btnAddStore').addEventListener('click', () => { document.getElementById('settingsModal').classList.add('hidden'); addStore(); });
+  document.getElementById('btnDeleteStore').addEventListener('click', deleteStore);
 
   const onNavClick = (e) => {
     const btn = e.target.closest('[data-view]');
@@ -2347,6 +2684,31 @@ function init() {
   // チャット操作
   document.getElementById('btnChatPhone').addEventListener('click', () => setView('chat'));
   document.getElementById('chatSend').addEventListener('click', chatSubmit);
+  // 画像の添付（📷ボタン）・貼り付け（Ctrl+V / 長押し貼り付け）・ドラッグ＆ドロップ
+  document.getElementById('chatAttach').addEventListener('click', () => document.getElementById('chatFile').click());
+  document.getElementById('chatFile').addEventListener('change', (e) => {
+    const hint = document.getElementById('chatInput').value.trim();
+    document.getElementById('chatInput').value = '';
+    chatHandleImages(e.target.files, hint);
+    e.target.value = '';
+  });
+  document.addEventListener('paste', (e) => {
+    if (view !== 'chat' || !e.clipboardData) return;
+    const files = [...e.clipboardData.items].filter((it) => it.kind === 'file').map((it) => it.getAsFile()).filter(Boolean);
+    if (!files.length) return;
+    e.preventDefault();
+    const hint = document.getElementById('chatInput').value.trim();
+    document.getElementById('chatInput').value = '';
+    chatHandleImages(files, hint);
+  });
+  const dropZone = document.getElementById('view-chat');
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if (e.dataTransfer && e.dataTransfer.files.length) chatHandleImages(e.dataTransfer.files, document.getElementById('chatInput').value.trim());
+  });
   document.getElementById('chatInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) chatSubmit();
   });
@@ -2375,7 +2737,8 @@ function init() {
 
   // 別タブ（自社予約サイト等）での予約を即時反映
   window.addEventListener('storage', (e) => {
-    if (e.key === LS_KEY) { load(); renderAll(); }
+    if (e.key === LS_REGISTRY) { loadRegistry(); load(); renderAll(); }
+    else if (e.key === dataKey(registry.currentId)) { load(); renderAll(); }
   });
 
   // ドラッグ用グローバルリスナー（予約ブロック移動＋範囲選択）
@@ -2436,8 +2799,8 @@ function init() {
   });
   document.getElementById('btnAddCourseMaster').addEventListener('click', () => {
     courseWork.push({ id: 'crs' + uid(), name: '' });
-    renderMasterRows('courseRows', courseWork);
-    const inputs = document.querySelectorAll('#courseRows input');
+    renderCourseRows();
+    const inputs = document.querySelectorAll('#courseRows input.cr-name');
     inputs[inputs.length - 1]?.focus();
   });
   document.getElementById('btnAddTagMaster').addEventListener('click', () => {
