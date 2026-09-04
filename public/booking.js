@@ -1159,8 +1159,11 @@ function submit() {
     createdAt: now,
     updatedAt: now,
   };
-  st.reservations.push(res);
-  saveDb(st);
+  // 保存直前に最新データを読み直し、予約の追加だけを書き込む（台帳側の設定変更を巻き戻さない）
+  const fresh = db() || st;
+  if (!Array.isArray(fresh.reservations)) fresh.reservations = [];
+  fresh.reservations.push(res);
+  saveDb(fresh);
   doneRes = res;
   render();
   window.scrollTo(0, 0);

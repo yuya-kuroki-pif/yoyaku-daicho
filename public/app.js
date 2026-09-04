@@ -164,6 +164,7 @@ function switchStore(id) {
   registry.currentId = id;
   saveRegistry();
   load();
+  loadSessionKeys();
   renderAll();
 }
 function addStore() {
@@ -192,6 +193,7 @@ function deleteStore() {
   saveRegistry();
   document.getElementById('settingsModal').classList.add('hidden');
   load();
+  loadSessionKeys();
   renderAll();
 }
 function renderStoreSwitch() {
@@ -320,6 +322,7 @@ function renderDateBar() {
   const badge = document.getElementById('newBadge');
   badge.classList.toggle('hidden', newCount === 0);
   badge.textContent = dict().fmtNew(newCount);
+  renderBackupNote();
 }
 
 /* ---------- 来店回数（dinii風「n回」チップ用） ---------- */
@@ -1835,6 +1838,13 @@ function openSettingsModal() {
   document.getElementById('storeExtraFields').innerHTML = STORE_EXTRA_KEYS.map((k) =>
     `<div class="field"><label>${esc(t('storeExtraLabels')[k] || k)}</label><input type="text" id="${settingInputId(k)}"></div>`).join('');
   STORE_TEXT_KEYS.forEach((k) => { document.getElementById(settingInputId(k)).value = state.settings[k] || ''; });
+  document.getElementById('sClaudeApiKey').value = getClaudeKey();
+  document.getElementById('sClaudeApiKey').type = 'password';
+  document.getElementById('sClaudeShow').checked = false;
+  document.getElementById('sGoogleApiKey').type = 'password';
+  document.getElementById('sGoogleShow').checked = false;
+  document.getElementById('sAiDailyLimit').value = state.settings.aiDailyLimit || 50;
+  renderLockSettings();
 
   document.getElementById('settingsModal').classList.remove('hidden');
 }
@@ -1895,7 +1905,7 @@ function addTableRow(tb) {
   wrap.appendChild(row);
 }
 
-function saveSettings() {
+async function saveSettings() {
   const openMin = Number(document.getElementById('sOpen').value);
   const closeMin = Number(document.getElementById('sClose').value);
   if (closeMin > openMin) {
@@ -1930,12 +1940,186 @@ function saveSettings() {
   state.settings.storeAddress = document.getElementById('sStoreAddress').value.trim();
   state.settings.storeNote = document.getElementById('sStoreNote').value.trim();
   STORE_TEXT_KEYS.forEach((k) => { state.settings[k] = document.getElementById(settingInputId(k)).value.trim(); });
+  state.settings.aiDailyLimit = Math.max(1, Math.min(1000, Number(document.getElementById('sAiDailyLimit').value) || 50));
+  // Claude API キー: ロック有効時は暗号化して保存し、平文は残さない
+  if (lockEnabled() && lockState.cryptoKey) {
+    const plain = state.settings.claudeApiKey;
+    sessionKeys.claude = plain;
+    state.settings.claudeApiKeyEnc = plain ? await encryptStr(lockState.cryptoKey, plain) : '';
+    state.settings.claudeApiKey = '';
+  } else {
+    state.settings.claudeApiKeyEnc = '';
+    sessionKeys.claude = state.settings.claudeApiKey;
+  }
   // コース・タグのマスタ（空名は除外）
   state.courses = courseWork.filter((c) => c.name.trim()).map((c) => ({ id: c.id, name: c.name.trim(), price: (c.price || '').trim(), desc: (c.desc || '').trim() }));
   state.tags = tagWork.filter((c) => c.name.trim()).map((c) => ({ id: c.id, name: c.name.trim() }));
   save();
   document.getElementById('settingsModal').classList.add('hidden');
   renderAll();
+}
+
+/* ---------- 端末ロック（PIN）と API キーの保護 ----------
+ * PIN は塩付き SHA-256 で店舗共通の registry に保存。Claude API キーは PIN から PBKDF2 で導出した鍵（AES-GCM）で
+ * 暗号化して保存し、ロック解除中だけメモリ上で保持する。（Google のキーは予約サイト側でも必要なため平文のまま。
+ * 参照元ドメインと API の制限で保護する） */
+const lockState = { locked: false, cryptoKey: null, fails: 0, lockedUntil: 0, lastActivity: Date.now() };
+const sessionKeys = { claude: '' };
+const textEnc = new TextEncoder();
+const textDec = new TextDecoder();
+function b64(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+function unb64(s) { return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)); }
+async function sha256Hex(str) {
+  const h = await crypto.subtle.digest('SHA-256', textEnc.encode(str));
+  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+async function deriveKey(pin, saltB64) {
+  const km = await crypto.subtle.importKey('raw', textEnc.encode(pin), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: unb64(saltB64), iterations: 150000, hash: 'SHA-256' }, km,
+    { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+async function encryptStr(key, str) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, textEnc.encode(str));
+  return `${b64(iv)}.${b64(ct)}`;
+}
+async function decryptStr(key, packed) {
+  const [ivs, cts] = String(packed).split('.');
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(ivs) }, key, unb64(cts));
+  return textDec.decode(pt);
+}
+function lockConfig() { return (registry && registry.lock) || null; }
+function lockEnabled() { return !!lockConfig(); }
+/* 使用する Claude API キー（暗号化保存時はロック解除中のメモリ上の値） */
+function getClaudeKey() { return (sessionKeys.claude || state.settings.claudeApiKey || '').trim(); }
+
+/* 全店舗の Claude キーを（旧鍵で復号 →）新鍵で暗号化、または平文に戻す */
+async function reencryptKeysAllStores(oldKey, newKey) {
+  for (const s of registry.stores) {
+    const raw = localStorage.getItem(dataKey(s.id));
+    if (!raw) continue;
+    let data;
+    try { data = JSON.parse(raw); } catch (e) { continue; }
+    const st = data.settings || (data.settings = {});
+    let plain = st.claudeApiKey || '';
+    if (st.claudeApiKeyEnc && oldKey) { try { plain = await decryptStr(oldKey, st.claudeApiKeyEnc); } catch (e) { plain = ''; } }
+    if (newKey) { st.claudeApiKeyEnc = plain ? await encryptStr(newKey, plain) : ''; st.claudeApiKey = ''; }
+    else { st.claudeApiKey = plain; st.claudeApiKeyEnc = ''; }
+    localStorage.setItem(dataKey(s.id), JSON.stringify(data));
+  }
+  load();
+  await loadSessionKeys();
+}
+async function loadSessionKeys() {
+  sessionKeys.claude = '';
+  if (state.settings.claudeApiKeyEnc && lockState.cryptoKey) {
+    try { sessionKeys.claude = await decryptStr(lockState.cryptoKey, state.settings.claudeApiKeyEnc); } catch (e) { sessionKeys.claude = ''; }
+  }
+}
+async function setPin(pin, minutes) {
+  const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
+  const hash = await sha256Hex(`${salt}:${pin}`);
+  const newKey = await deriveKey(pin, salt);
+  const oldKey = lockState.cryptoKey;
+  registry.lock = { salt, hash, minutes: Number(minutes) || 0 };
+  saveRegistry();
+  lockState.cryptoKey = newKey;
+  await reencryptKeysAllStores(oldKey, newKey);
+}
+async function clearPin() {
+  const oldKey = lockState.cryptoKey;
+  registry.lock = null;
+  saveRegistry();
+  lockState.cryptoKey = null;
+  await reencryptKeysAllStores(oldKey, null);
+}
+function lockApp() {
+  if (!lockEnabled() || lockState.locked) return;
+  lockState.locked = true;
+  sessionKeys.claude = '';
+  lockState.cryptoKey = null;
+  closeCellPopover();
+  document.getElementById('lockScreen').classList.remove('hidden');
+  document.getElementById('lockMsg').textContent = '';
+  const inp = document.getElementById('lockPin');
+  inp.value = '';
+  setTimeout(() => inp.focus(), 50);
+}
+async function tryUnlock() {
+  const inp = document.getElementById('lockPin');
+  const msg = document.getElementById('lockMsg');
+  const now = Date.now();
+  if (now < lockState.lockedUntil) { msg.textContent = t('lockWait').replace('{sec}', Math.ceil((lockState.lockedUntil - now) / 1000)); return; }
+  const pin = inp.value.trim();
+  const c = lockConfig();
+  if (!c || !pin) return;
+  if ((await sha256Hex(`${c.salt}:${pin}`)) !== c.hash) {
+    lockState.fails += 1;
+    inp.value = '';
+    if (lockState.fails >= 5) {
+      // 5回以上の失敗で待ち時間（30秒 × 超過回数、最大4分）
+      lockState.lockedUntil = now + 30000 * Math.min(8, lockState.fails - 4);
+      msg.textContent = t('lockWait').replace('{sec}', Math.ceil((lockState.lockedUntil - now) / 1000));
+    } else {
+      msg.textContent = t('lockWrong');
+    }
+    return;
+  }
+  lockState.fails = 0;
+  lockState.cryptoKey = await deriveKey(pin, c.salt);
+  await loadSessionKeys();
+  lockState.locked = false;
+  lockState.lastActivity = Date.now();
+  document.getElementById('lockScreen').classList.add('hidden');
+  inp.value = '';
+  renderAll();
+}
+function touchActivity() { lockState.lastActivity = Date.now(); }
+function checkAutoLock() {
+  const c = lockConfig();
+  if (!c || lockState.locked || !c.minutes) return;
+  if (Date.now() - lockState.lastActivity > c.minutes * 60000) lockApp();
+}
+/* 設定画面: ロック設定 */
+function renderLockSettings() {
+  const c = lockConfig();
+  document.getElementById('lockStatus').textContent = c
+    ? t('lockOn').replace('{min}', c.minutes ? `${c.minutes}${t('minutesUnit')}` : t('lockNever'))
+    : t('lockOff');
+  document.getElementById('btnLockClear').classList.toggle('hidden', !c);
+  document.getElementById('sLockMinutes').value = c ? String(c.minutes) : '10';
+  document.getElementById('sLockPin').value = '';
+  document.getElementById('sLockPin2').value = '';
+}
+async function saveLockSettings() {
+  const pin = document.getElementById('sLockPin').value.trim();
+  const pin2 = document.getElementById('sLockPin2').value.trim();
+  const minutes = Number(document.getElementById('sLockMinutes').value) || 0;
+  const c = lockConfig();
+  if (!pin && c) { c.minutes = minutes; saveRegistry(); renderLockSettings(); alert(t('lockUpdated')); return; }
+  if (!/^\d{4,8}$/.test(pin)) { alert(t('lockPinFormat')); return; }
+  if (pin !== pin2) { alert(t('lockPinMismatch')); return; }
+  await setPin(pin, minutes);
+  renderLockSettings();
+  alert(t('lockSet'));
+}
+async function removeLock() {
+  if (!confirm(t('lockClearConfirm'))) return;
+  await clearPin();
+  renderLockSettings();
+}
+
+/* ---------- バックアップの催促（7日以上未保存なら上部に表示） ---------- */
+function renderBackupNote() {
+  const bn = document.getElementById('backupNote');
+  const days = registry.lastBackupAt ? (Date.now() - registry.lastBackupAt) / 86400000 : Infinity;
+  const show = state.reservations.length > 0 && days > 7 && registry.backupDismissed !== todayStr();
+  bn.classList.toggle('hidden', !show);
+  if (show) {
+    document.getElementById('backupNoteText').textContent = registry.lastBackupAt
+      ? t('backupOld').replace('{d}', String(Math.floor(days)))
+      : t('backupNever');
+  }
 }
 
 /* ---------- チャットへの画像貼り付け（DMのスクリーンショット → 予約内容の読み取り） ----------
@@ -2014,7 +2198,7 @@ function extractSystemPrompt() {
 }
 
 async function callClaudeExtract(dataUrl, hintText, withSchema) {
-  const key = (state.settings.claudeApiKey || '').trim();
+  const key = getClaudeKey();
   const base64 = dataUrl.split(',')[1];
   const body = {
     model: CLAUDE_MODEL,
@@ -2148,7 +2332,14 @@ async function chatHandleImages(files, hintText) {
     if (hintText) { const p = document.createElement('div'); p.textContent = hintText; wrap.appendChild(p); }
     chatAppendNode('user', wrap);
 
-    if (!(state.settings.claudeApiKey || '').trim()) { chatAppend('bot', t('aiNeedKey')); continue; }
+    if (!getClaudeKey()) { chatAppend('bot', t('aiNeedKey')); continue; }
+    // 1日あたりの読み取り回数の上限（キーの悪用・誤操作による費用の上振れ防止）
+    const today = todayStr();
+    registry.ai = registry.ai && registry.ai.date === today ? registry.ai : { date: today, count: 0 };
+    const limit = Math.max(1, Number(state.settings.aiDailyLimit) || 50);
+    if (registry.ai.count >= limit) { chatAppend('bot', t('aiLimitReached').replace('{n}', String(limit))); continue; }
+    registry.ai.count += 1;
+    saveRegistry();
     const waiting = chatAppend('bot', t('aiReading'));
     try {
       const info = await extractReservationFromImage(dataUrl, hintText);
@@ -2626,6 +2817,9 @@ function downloadFile(name, content, type) {
 }
 function exportJson() {
   downloadFile(`yoyaku-backup-${todayStr()}.json`, JSON.stringify(state, null, 2), 'application/json');
+  registry.lastBackupAt = Date.now();
+  saveRegistry();
+  renderBackupNote();
 }
 function importJsonFile(file) {
   if (!file) return;
@@ -2640,6 +2834,9 @@ function importJsonFile(file) {
       if (!confirm(t('importConfirm'))) return;
       localStorage.setItem(dataKey(registry.currentId), JSON.stringify(data));
       load(); // 旧形式の移行処理も適用
+      // 復元データに平文の Claude キーがあり、ロックが有効なら暗号化し直す
+      if (lockEnabled() && lockState.cryptoKey) reencryptKeysAllStores(lockState.cryptoKey, lockState.cryptoKey);
+      else loadSessionKeys();
       document.getElementById('settingsModal').classList.add('hidden');
       renderAll();
     } catch (e) {
@@ -2722,6 +2919,21 @@ function init() {
   document.getElementById('storeSwitch').addEventListener('change', (e) => {
     if (e.target.value === '__add') addStore(); else switchStore(e.target.value);
   });
+  // 端末ロック（PIN）
+  document.getElementById('btnUnlock').addEventListener('click', tryUnlock);
+  document.getElementById('lockPin').addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
+  ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => document.addEventListener(ev, touchActivity, { passive: true }));
+  setInterval(checkAutoLock, 15000);
+  document.addEventListener('visibilitychange', () => { if (document.hidden && lockEnabled()) lockApp(); });
+  document.getElementById('btnLockSave').addEventListener('click', saveLockSettings);
+  document.getElementById('btnLockClear').addEventListener('click', removeLock);
+  if (lockEnabled()) lockApp();
+  // バックアップ催促
+  document.getElementById('btnBackupNow').addEventListener('click', exportJson);
+  document.getElementById('btnBackupDismiss').addEventListener('click', () => { registry.backupDismissed = todayStr(); saveRegistry(); renderBackupNote(); });
+  // API キーの表示切替
+  document.getElementById('sClaudeShow').addEventListener('change', (e) => { document.getElementById('sClaudeApiKey').type = e.target.checked ? 'text' : 'password'; });
+  document.getElementById('sGoogleShow').addEventListener('change', (e) => { document.getElementById('sGoogleApiKey').type = e.target.checked ? 'text' : 'password'; });
   document.getElementById('btnGoogleImport').addEventListener('click', importStoreInfoFromGoogle);
   document.getElementById('btnGoogleFind').addEventListener('click', findPlaceFromGoogle);
   document.getElementById('sGoogleQuery').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); findPlaceFromGoogle(); } });

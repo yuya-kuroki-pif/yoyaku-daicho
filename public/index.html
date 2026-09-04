@@ -8,7 +8,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=31">
+  <link rel="stylesheet" href="style.css?v=32">
 </head>
 <body>
   <!-- dinii風 細線SVGアイコン定義 -->
@@ -111,6 +111,11 @@
       </div>
     </header>
 
+    <div class="backup-note hidden" id="backupNote">
+      <span id="backupNoteText"></span>
+      <button class="btn primary small" id="btnBackupNow" data-i18n="exportJson"></button>
+      <button class="btn ghost small" id="btnBackupDismiss" data-i18n="backupLater"></button>
+    </div>
     <main>
       <section id="view-timetable" class="view">
         <div class="closed-banner hidden" id="closedBanner"></div>
@@ -324,6 +329,19 @@
           <button type="button" class="btn ghost" id="btnAddStore">＋ <span data-i18n="addStoreBtn2"></span></button>
           <button type="button" class="btn danger" id="btnDeleteStore"><span data-i18n="deleteStoreBtn"></span></button>
         </div>
+        <h3 class="combo-heading" data-i18n="lockHeading"></h3>
+        <p class="combo-note" data-i18n="lockNote"></p>
+        <p class="lock-status" id="lockStatus"></p>
+        <div class="form-grid">
+          <div class="field"><label data-i18n="lockPinLabel"></label><input type="password" id="sLockPin" inputmode="numeric" maxlength="8" autocomplete="new-password"></div>
+          <div class="field"><label data-i18n="lockPin2Label"></label><input type="password" id="sLockPin2" inputmode="numeric" maxlength="8" autocomplete="new-password"></div>
+          <div class="field"><label data-i18n="lockMinutesLabel"></label><select id="sLockMinutes"><option value="5">5</option><option value="10">10</option><option value="30">30</option><option value="0" data-i18n="lockNever"></option></select></div>
+        </div>
+        <div class="backup-actions">
+          <button type="button" class="btn primary" id="btnLockSave">🔒 <span data-i18n="lockSaveBtn"></span></button>
+          <button type="button" class="btn danger hidden" id="btnLockClear"><span data-i18n="lockClearBtn"></span></button>
+        </div>
+
         <h3 class="combo-heading" data-i18n="hoursHeading"></h3>
         <div class="form-grid">
           <div class="field">
@@ -387,7 +405,8 @@
         <h3 class="combo-heading" data-i18n="aiHeading"></h3>
         <p class="combo-note" data-i18n="aiNote"></p>
         <div class="form-grid">
-          <div class="field span2"><label data-i18n="aiKeyLabel"></label><input type="text" id="sClaudeApiKey" placeholder="sk-ant-…" autocomplete="off"></div>
+          <div class="field span2"><label data-i18n="aiKeyLabel"></label><input type="password" id="sClaudeApiKey" placeholder="sk-ant-…" autocomplete="off"><label class="chk small-chk"><input type="checkbox" id="sClaudeShow"> <span data-i18n="showKey"></span></label></div>
+          <div class="field"><label data-i18n="aiDailyLimitLabel"></label><input type="number" id="sAiDailyLimit" min="1" max="1000"></div>
         </div>
 
         <h3 class="combo-heading" data-i18n="googleHeading"></h3>
@@ -397,7 +416,7 @@
           <div class="field"><label>&nbsp;</label><button type="button" class="btn primary" id="btnGoogleFind">🔍 <span data-i18n="googleFindBtn"></span></button></div>
           <div class="field span3 hidden" id="googleCandidates"></div>
           <div class="field span2"><label data-i18n="googlePlaceIdLabel"></label><input type="text" id="sGooglePlaceId" placeholder="ChIJ…"></div>
-          <div class="field"><label data-i18n="googleApiKeyLabel"></label><input type="text" id="sGoogleApiKey" placeholder="AIza…" autocomplete="off"></div>
+          <div class="field"><label data-i18n="googleApiKeyLabel"></label><input type="password" id="sGoogleApiKey" placeholder="AIza…" autocomplete="off"><label class="chk small-chk"><input type="checkbox" id="sGoogleShow"> <span data-i18n="showKey"></span></label></div>
           <div class="field span3"><button type="button" class="btn ghost" id="btnGoogleImport">📥 <span data-i18n="googleImportBtn"></span></button></div>
           <div class="field span3"><a class="ext-link" href="https://developers.google.com/maps/documentation/places/web-service/place-id" target="_blank" rel="noopener" data-i18n="googleHelpLink"></a></div>
         </div>
@@ -485,7 +504,19 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=33"></script>
-  <script src="app.js?v=34"></script>
+  <!-- 端末ロック（PIN） -->
+  <div class="lock-screen hidden" id="lockScreen">
+    <div class="lock-box">
+      <div class="lock-logo">🔒</div>
+      <h2 data-i18n="lockTitle"></h2>
+      <p class="lock-sub" data-i18n="lockSub"></p>
+      <input type="password" id="lockPin" inputmode="numeric" autocomplete="off" maxlength="8" data-i18n-placeholder="lockPinPlaceholder">
+      <button class="btn primary full" id="btnUnlock" data-i18n="lockUnlock"></button>
+      <div class="lock-msg" id="lockMsg"></div>
+    </div>
+  </div>
+
+  <script src="i18n.js?v=34"></script>
+  <script src="app.js?v=35"></script>
 </body>
 </html>
