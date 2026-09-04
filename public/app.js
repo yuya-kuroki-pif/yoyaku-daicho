@@ -2479,6 +2479,37 @@ function renderClosedSettings() {
   });
 }
 
+/* ---------- 設定モーダル: Google マップから店舗情報を取り込む（空欄のみ埋める。保存はユーザーが確認して行う） ---------- */
+async function importStoreInfoFromGoogle() {
+  const pid = document.getElementById('sGooglePlaceId').value.trim();
+  const key = document.getElementById('sGoogleApiKey').value.trim();
+  if (!pid || !key) { alert(t('googleImportNeed')); return; }
+  const btn = document.getElementById('btnGoogleImport');
+  btn.disabled = true;
+  try {
+    const fields = GOOGLE_PLACE_FIELDS.split(',').filter((f) => f !== 'reviews' && f !== 'photos').join(',');
+    const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(pid)}?languageCode=${encodeURIComponent(state.settings.lang || 'ja')}`, {
+      headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': fields },
+    });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (err) { /* ignore */ }
+      throw new Error(msg);
+    }
+    const info = googlePlaceToInfo(await res.json(), state.settings.lang);
+    let n = 0;
+    Object.entries(info).forEach(([k, v]) => {
+      const el = document.getElementById(settingInputId(k));
+      if (el && !el.value.trim() && v) { el.value = v; n += 1; }
+    });
+    alert(n ? t('googleImportDone').replace('{n}', n) : t('googleImportNone'));
+  } catch (e) {
+    alert(`${t('googleImportError')} ${e.message || ''}`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 /* ---------- 設定モーダル: コース・タグのマスタ編集 ---------- */
 /* コースマスタ（名称・料金・説明。予約サイトのコース一覧に表示） */
 function renderCourseRows() {
@@ -2617,6 +2648,7 @@ function init() {
   document.getElementById('storeSwitch').addEventListener('change', (e) => {
     if (e.target.value === '__add') addStore(); else switchStore(e.target.value);
   });
+  document.getElementById('btnGoogleImport').addEventListener('click', importStoreInfoFromGoogle);
   document.getElementById('btnAddStore').addEventListener('click', () => { document.getElementById('settingsModal').classList.add('hidden'); addStore(); });
   document.getElementById('btnDeleteStore').addEventListener('click', deleteStore);
 

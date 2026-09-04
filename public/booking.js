@@ -12,7 +12,7 @@
 const LS_KEY = 'yoyaku-daicho-v1';
 const LS_REGISTRY = 'yoyaku-daicho-stores';
 const LANG_KEY = 'yoyaku-booking-lang';
-const GCACHE_KEY = 'yoyaku-google-place-cache-v2';
+const GCACHE_KEY = 'yoyaku-google-place-cache-v3';
 const MAX_GOOGLE_PHOTOS = 10;   // Places API が返す写真の上限
 const GCACHE_TTL = 6 * 60 * 60 * 1000;   // Google 取得結果のキャッシュ（6時間）
 const DUR = 120;         // 滞在想定（分）
@@ -195,7 +195,15 @@ function dataKeyName() {
 }
 function db() { try { return JSON.parse(localStorage.getItem(dataKeyName())); } catch (e) { return null; } }
 function saveDb(st) { localStorage.setItem(dataKeyName(), JSON.stringify(st)); }
-function settings(st) { return (st && st.settings) || {}; }
+/* 店舗設定。台帳で未入力の項目は Google マップの情報（取得済みのとき）で補完する */
+function settings(st) {
+  const s = (st && st.settings) || {};
+  const inf = google.status === 'ok' && google.data && google.data.info;
+  if (!inf) return s;
+  const merged = Object.assign({}, inf);
+  Object.keys(s).forEach((k) => { if (s[k] !== '' && s[k] != null) merged[k] = s[k]; });
+  return merged;
+}
 
 const siteParam = new URLSearchParams(location.search).get('site');
 function ownSite(st) {
@@ -299,7 +307,7 @@ function loadGoogle(st) {
   fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}?languageCode=${encodeURIComponent(lang)}`, {
     headers: {
       'X-Goog-Api-Key': key,
-      'X-Goog-FieldMask': 'displayName,rating,userRatingCount,reviews,googleMapsUri,photos',
+      'X-Goog-FieldMask': GOOGLE_PLACE_FIELDS,
     },
   })
     .then((res) => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
@@ -308,6 +316,7 @@ function loadGoogle(st) {
         rating: data.rating ?? null,
         count: data.userRatingCount ?? 0,
         mapsUri: data.googleMapsUri || '',
+        info: googlePlaceToInfo(data, lang),   // 住所・電話・営業時間などの補完用
         reviews: (data.reviews || []).map((r) => ({
           author: r.authorAttribution?.displayName || '',
           authorUri: r.authorAttribution?.uri || '',

@@ -229,6 +229,11 @@ const I18N = {
     googlePlaceIdLabel: 'Place ID',
     googleApiKeyLabel: 'Google API キー',
     googleHelpLink: 'Place ID の調べ方（Google の説明ページ）',
+    googleImportBtn: 'Googleマップから店舗情報を取り込む',
+    googleImportNeed: 'Place ID と Google API キーを先に入力してください',
+    googleImportDone: 'Googleマップから {n} 項目を取り込みました（空欄だった項目のみ）。内容を確認して「保存」を押してください。',
+    googleImportNone: '取り込める項目がありませんでした（すでに入力済みか、Google に情報がありません）',
+    googleImportError: 'Googleマップから取得できませんでした:',
     coursesNote: '予約サイトの「コース」タブと予約フォームに表示されます。料金・説明は任意です。',
     courseNameLabel: 'コース名',
     coursePriceLabel: '料金',
@@ -473,6 +478,11 @@ const I18N = {
     googlePlaceIdLabel: 'Place ID',
     googleApiKeyLabel: 'Google API key',
     googleHelpLink: 'Cách tìm Place ID (trang hướng dẫn của Google)',
+    googleImportBtn: 'Lấy thông tin cửa hàng từ Google Maps',
+    googleImportNeed: 'Hãy nhập Place ID và Google API key trước',
+    googleImportDone: 'Đã lấy {n} mục từ Google Maps (chỉ các mục còn trống). Kiểm tra rồi bấm Lưu.',
+    googleImportNone: 'Không có mục nào để lấy (đã nhập sẵn hoặc Google không có dữ liệu)',
+    googleImportError: 'Không lấy được từ Google Maps:',
     coursesNote: 'Hiển thị ở tab Course và form đặt bàn trên trang đặt bàn. Giá và mô tả là tùy chọn.',
     courseNameLabel: 'Tên course',
     coursePriceLabel: 'Giá',
@@ -490,3 +500,57 @@ const I18N = {
     fmtVisits(n) { return `${n} lần`; },
   },
 };
+
+
+/* ---------- Google Places API (New) の応答 → 店舗情報（台帳の設定項目と同じキー） ----------
+ * 予約サイト（空欄の補完）と台帳の設定画面（取り込みボタン）で共用する。 */
+const GOOGLE_PLACE_FIELDS = 'displayName,rating,userRatingCount,reviews,googleMapsUri,photos,formattedAddress,nationalPhoneNumber,internationalPhoneNumber,regularOpeningHours.weekdayDescriptions,websiteUri,priceRange,primaryTypeDisplayName,editorialSummary,paymentOptions,parkingOptions,goodForChildren';
+function googlePlaceToInfo(data, lang) {
+  const L = lang === 'vi'
+    ? { card: 'Thẻ tín dụng', debit: 'Thẻ ghi nợ', nfc: 'Thanh toán không tiếp xúc', cash: 'Chỉ tiền mặt',
+        freeLot: 'Bãi đỗ miễn phí', paidLot: 'Bãi đỗ có phí', freeStreet: 'Đỗ ven đường (miễn phí)', paidStreet: 'Đỗ ven đường (có phí)',
+        valet: 'Valet', freeGarage: 'Gara miễn phí', paidGarage: 'Gara có phí', kids: 'Phù hợp với trẻ em', sep: ', ' }
+    : { card: 'クレジットカード可', debit: 'デビットカード可', nfc: 'タッチ決済（電子マネー）可', cash: '現金のみ',
+        freeLot: '無料駐車場あり', paidLot: '有料駐車場あり', freeStreet: '路上駐車（無料）可', paidStreet: '路上駐車（有料）',
+        valet: 'バレーパーキング', freeGarage: '無料ガレージあり', paidGarage: '有料ガレージあり', kids: 'お子様連れ歓迎', sep: '・' };
+  const info = {};
+  if (!data) return info;
+  if (data.displayName && data.displayName.text) info.storeName = data.displayName.text;
+  if (data.primaryTypeDisplayName && data.primaryTypeDisplayName.text) info.storeGenre = data.primaryTypeDisplayName.text;
+  if (data.nationalPhoneNumber || data.internationalPhoneNumber) info.storePhone = data.nationalPhoneNumber || data.internationalPhoneNumber;
+  if (data.formattedAddress) info.storeAddress = data.formattedAddress;
+  const wd = data.regularOpeningHours && data.regularOpeningHours.weekdayDescriptions;
+  if (wd && wd.length) info.storeHours = wd.join(' / ');
+  if (data.websiteUri) info.storeWebsite = data.websiteUri;
+  if (data.priceRange && (data.priceRange.startPrice || data.priceRange.endPrice)) {
+    // 例: 200,000〜400,000 VND（通貨は末尾に1回）
+    const sp = data.priceRange.startPrice, ep = data.priceRange.endPrice;
+    const num = (p) => p ? Number(p.units || 0).toLocaleString() : '';
+    const cur = (ep && ep.currencyCode) || (sp && sp.currencyCode) || '';
+    info.storeBudget = ([num(sp), num(ep)].filter(Boolean).join('〜') + ' ' + cur).trim();
+  }
+  if (data.editorialSummary && data.editorialSummary.text) info.storeDescription = data.editorialSummary.text;
+  const po = data.paymentOptions;
+  if (po) {
+    const pay = [];
+    if (po.acceptsCashOnly) pay.push(L.cash);
+    if (po.acceptsCreditCards) pay.push(L.card);
+    if (po.acceptsDebitCards) pay.push(L.debit);
+    if (po.acceptsNfc) pay.push(L.nfc);
+    if (pay.length) info.storePayment = pay.join(L.sep);
+  }
+  const pk = data.parkingOptions;
+  if (pk) {
+    const park = [];
+    if (pk.freeParkingLot) park.push(L.freeLot);
+    if (pk.paidParkingLot) park.push(L.paidLot);
+    if (pk.freeStreetParking) park.push(L.freeStreet);
+    if (pk.paidStreetParking) park.push(L.paidStreet);
+    if (pk.valetParking) park.push(L.valet);
+    if (pk.freeGarageParking) park.push(L.freeGarage);
+    if (pk.paidGarageParking) park.push(L.paidGarage);
+    if (park.length) info.storeParking = park.join(L.sep);
+  }
+  if (data.goodForChildren) info.storeKids = L.kids;
+  return info;
+}
