@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src * data: blob:; connect-src 'self' https://places.googleapis.com https://api.anthropic.com; frame-src https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src * data: blob:; connect-src 'self' https://places.googleapis.com https://api.anthropic.com https://*.supabase.co wss://*.supabase.co; frame-src https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -111,6 +111,7 @@
       </div>
     </header>
 
+    <div class="cloud-status hidden" id="cloudStatus"></div>
     <div class="backup-note hidden" id="backupNote">
       <span id="backupNoteText"></span>
       <button class="btn primary small" id="btnBackupNow" data-i18n="exportJson"></button>
@@ -329,6 +330,13 @@
           <button type="button" class="btn ghost" id="btnAddStore">＋ <span data-i18n="addStoreBtn2"></span></button>
           <button type="button" class="btn danger" id="btnDeleteStore"><span data-i18n="deleteStoreBtn"></span></button>
         </div>
+        <div id="cloudSection" class="hidden">
+          <h3 class="combo-heading" data-i18n="cloudHeading"></h3>
+          <p class="combo-note" data-i18n="cloudNote"></p>
+          <p class="lock-status" id="cloudUser"></p>
+          <div class="backup-actions"><button type="button" class="btn ghost" id="btnSignOut"><span data-i18n="cloudSignOut"></span></button></div>
+        </div>
+
         <h3 class="combo-heading" data-i18n="lockHeading"></h3>
         <p class="combo-note" data-i18n="lockNote"></p>
         <p class="lock-status" id="lockStatus"></p>
@@ -504,6 +512,19 @@
     </div>
   </div>
 
+  <!-- スタッフログイン（クラウド保存時のみ） -->
+  <div class="lock-screen hidden" id="authScreen" style="z-index:600">
+    <div class="lock-box auth-box">
+      <div class="lock-logo">☁️</div>
+      <h2 data-i18n="authTitle"></h2>
+      <p class="lock-sub" data-i18n="authSub"></p>
+      <input type="email" id="authEmail" data-i18n-placeholder="authEmail" autocomplete="username">
+      <input type="password" id="authPassword" data-i18n-placeholder="authPassword" autocomplete="current-password">
+      <button class="btn primary full" id="btnSignIn" data-i18n="authSignIn"></button>
+      <div class="lock-msg" id="authMsg"></div>
+    </div>
+  </div>
+
   <!-- 端末ロック（PIN） -->
   <div class="lock-screen hidden" id="lockScreen">
     <div class="lock-box">
@@ -516,7 +537,10 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=34"></script>
-  <script src="app.js?v=35"></script>
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js?v=1"></script>
+  <script src="store.js?v=1"></script>
+  <script src="i18n.js?v=35"></script>
+  <script src="app.js?v=36"></script>
 </body>
 </html>

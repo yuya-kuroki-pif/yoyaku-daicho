@@ -11,6 +11,7 @@
 
 const LS_KEY = 'yoyaku-daicho-v1';
 const LS_REGISTRY = 'yoyaku-daicho-stores';   // 店舗一覧と表示中の店舗ID
+const cloudMode = typeof Cloud !== 'undefined' && Cloud.enabled;   // config.js に Supabase の接続先があればクラウド保存
 /* Google API キーは公開リポジトリに含めない（端末ごとにテーブル設定で入力する） */
 /* 最初の店舗の初期値（Robata Naru-Charcoal Grill / ハノイ）。店舗情報は設定画面で変更可 */
 const DEFAULT_STORE_INFO = {
@@ -159,12 +160,12 @@ function loadRegistry() {
   }
   if (!registry.stores.some((s) => s.id === registry.currentId)) registry.currentId = registry.stores[0].id;
 }
-function switchStore(id) {
+async function switchStore(id) {
   if (!registry.stores.some((s) => s.id === id)) return;
   registry.currentId = id;
   saveRegistry();
-  load();
-  loadSessionKeys();
+  try { await loadState(); } catch (e) { setCloudStatus('error', `${t('cloudLoadError')} ${e.message || ''}`); return; }
+  await loadSessionKeys();
   renderAll();
 }
 function addStore() {
@@ -180,20 +181,25 @@ function addStore() {
   state.reservations = [];
   Object.keys(DEFAULT_STORE_INFO).forEach((k) => { state.settings[k] = ''; });
   state.settings.storeName = name;
+  if (cloudMode) { cloudSync.resSnap = new Map(); cloudSync.docSnap = ''; cloudSync.ready = true; subscribeCloud(id); }
   save();
   renderAll();
 }
-function deleteStore() {
+async function deleteStore() {
   if (registry.stores.length <= 1) { alert(t('lastStoreWarn')); return; }
   const cur = currentStore();
   if (!confirm(t('deleteStoreConfirm').replace('{name}', cur.name))) return;
+  if (cloudMode) {
+    try { await Cloud.deleteStore(cur.id); } catch (e) { alert(`${t('cloudSaveError')} ${e.message || ''}`); return; }
+    localStorage.removeItem(secretsKey(cur.id));
+  }
   localStorage.removeItem(dataKey(cur.id));
   registry.stores = registry.stores.filter((s) => s.id !== cur.id);
   registry.currentId = registry.stores[0].id;
   saveRegistry();
   document.getElementById('settingsModal').classList.add('hidden');
-  load();
-  loadSessionKeys();
+  await loadState();
+  await loadSessionKeys();
   renderAll();
 }
 function renderStoreSwitch() {
@@ -203,64 +209,72 @@ function renderStoreSwitch() {
     `<option value="__add">${esc(t('addStoreBtn'))}</option>`;
 }
 
+/* 旧データの移行（端末内保存・クラウド共通）。変更があれば true */
+function migrateState() {
+  let changed = false;
+  if (!state.settings) { state.settings = { lang: 'ja', openMin: 11 * 60, closeMin: 23 * 60 }; changed = true; }
+  if (!Array.isArray(state.tables)) { state.tables = defaultState().tables; changed = true; }
+  if (!Array.isArray(state.reservations)) { state.reservations = []; changed = true; }
+  if (!state.sites) { state.sites = defaultSites(); changed = true; }
+  if (!state.sitesV2) {
+    // グルメサイトの初期登録を廃止し、URL発行型のチャネル構成へ
+    state.sites = state.sites.filter((s) => !['食べログ', 'ホットペッパー', 'ぐるなび'].includes(s.name));
+    const own = state.sites.find((s) => s.own) || state.sites.find((s) => s.name === '自社サイト');
+    if (own) {
+      own.own = true;
+      if (own.name === '自社サイト') own.name = '自社予約サイト';
+    } else {
+      state.sites.unshift({ id: uid(), name: '自社予約サイト', color: '#0ea5e9', enabled: true, own: true, tableIds: state.tables.slice(0, 3).map((tb) => tb.id) });
+    }
+    if (!state.sites.some((s) => s.name === 'Instagram')) {
+      state.sites.push({ id: uid(), name: 'Instagram', color: '#ec4899', enabled: true, tableIds: state.tables.slice(0, 3).map((tb) => tb.id) });
+    }
+    if (!state.sites.some((s) => s.name === 'Googleマップ')) {
+      state.sites.push({ id: uid(), name: 'Googleマップ', color: '#16a34a', enabled: true, tableIds: state.tables.slice(0, 3).map((tb) => tb.id) });
+    }
+    state.sitesV2 = true;
+    changed = true;
+  }
+  if (!state.tablesV2) {
+    const defs = { t1: 'ホール', t2: 'ホール', t3: 'ホール', t4: 'ホール', t5: 'カウンター', t6: 'カウンター', t7: '個室' };
+    state.tables.forEach((tb) => { if (tb.group === undefined) tb.group = defs[tb.id] || ''; });
+    state.tablesV2 = true;
+    changed = true;
+  }
+  if (!state.combos) {
+    state.combos = (tableById('t1') && tableById('t2')) ? [{ id: uid(), tableIds: ['t1', 't2'], max: 8 }] : [];
+    changed = true;
+  }
+  if (!state.courses) { state.courses = defaultCourses(); changed = true; }
+  if (!state.tags) { state.tags = defaultTags(); changed = true; }
+  if (!state.settings.closedDays) { state.settings.closedDays = []; changed = true; }
+  if (!state.settings.closedDates) { state.settings.closedDates = []; changed = true; }
+  // Google 連携の初期値（未設定のときだけ。意図的に空にした設定は保持）
+  if (state.settings.googlePlaceId === undefined && !state.settings.storeName) {
+    Object.assign(state.settings, DEFAULT_STORE_INFO);
+    const cs = currentStore();
+    if (cs && cs.name === '店舗1') { cs.name = DEFAULT_STORE_INFO.storeName; saveRegistry(); }
+    changed = true;
+  }
+  return changed;
+}
+/* 端末内保存の読み込み */
 function load() {
   try {
     const raw = localStorage.getItem(dataKey(registry.currentId));
     if (raw) {
       state = JSON.parse(raw);
-      // 旧データの移行
-      if (!state.sites) { state.sites = defaultSites(); save(); }
-      if (!state.sitesV2) {
-        // グルメサイトの初期登録を廃止し、URL発行型のチャネル構成へ
-        state.sites = state.sites.filter((s) => !['食べログ', 'ホットペッパー', 'ぐるなび'].includes(s.name));
-        const own = state.sites.find((s) => s.own) || state.sites.find((s) => s.name === '自社サイト');
-        if (own) {
-          own.own = true;
-          if (own.name === '自社サイト') own.name = '自社予約サイト';
-        } else {
-          state.sites.unshift({ id: uid(), name: '自社予約サイト', color: '#0ea5e9', enabled: true, own: true, tableIds: state.tables.slice(0, 3).map((tb) => tb.id) });
-        }
-        if (!state.sites.some((s) => s.name === 'Instagram')) {
-          state.sites.push({ id: uid(), name: 'Instagram', color: '#ec4899', enabled: true, tableIds: state.tables.slice(0, 3).map((tb) => tb.id) });
-        }
-        if (!state.sites.some((s) => s.name === 'Googleマップ')) {
-          state.sites.push({ id: uid(), name: 'Googleマップ', color: '#16a34a', enabled: true, tableIds: state.tables.slice(0, 3).map((tb) => tb.id) });
-        }
-        state.sitesV2 = true;
-        save();
-      }
-      if (!state.tablesV2) {
-        // 既定テーブルへ初期グループを付与
-        const defs = { t1: 'ホール', t2: 'ホール', t3: 'ホール', t4: 'ホール', t5: 'カウンター', t6: 'カウンター', t7: '個室' };
-        state.tables.forEach((tb) => { if (tb.group === undefined) tb.group = defs[tb.id] || ''; });
-        state.tablesV2 = true;
-        save();
-      }
-      if (!state.combos) {
-        // 結合（合席）の初期サンプル: T1+T2で8名まで
-        state.combos = (tableById('t1') && tableById('t2')) ? [{ id: uid(), tableIds: ['t1', 't2'], max: 8 }] : [];
-        save();
-      }
-      // コース／タグのマスタ（予約フォームの選択肢）
-      if (!state.courses) { state.courses = defaultCourses(); save(); }
-      if (!state.tags) { state.tags = defaultTags(); save(); }
-      // 定休日・臨時休業日
-      if (!state.settings.closedDays) { state.settings.closedDays = []; save(); }
-      if (!state.settings.closedDates) { state.settings.closedDates = []; save(); }
-      // Google 連携の初期値（未設定のときだけ。意図的に空にした設定は保持）
-      if (state.settings.googlePlaceId === undefined && !state.settings.storeName) {
-        Object.assign(state.settings, DEFAULT_STORE_INFO);
-        const cs = currentStore();
-        if (cs && cs.name === '店舗1') { cs.name = DEFAULT_STORE_INFO.storeName; saveRegistry(); }
-        save();
-      }
+      if (migrateState()) save();
       return;
     }
   } catch (e) { /* 壊れたデータは初期化 */ }
   state = defaultState();
   save();
 }
-function save() { localStorage.setItem(dataKey(registry.currentId), JSON.stringify(state)); }
+function save() {
+  if (cloudMode) { saveCloud(); return; }
+  localStorage.setItem(dataKey(registry.currentId), JSON.stringify(state));
+}
 
 /* ---------- 定休日・顧客照合・席数チェックの共通ヘルパー ---------- */
 function isClosedDate(date) {
@@ -1959,6 +1973,184 @@ async function saveSettings() {
   renderAll();
 }
 
+/* ---------- クラウド保存（Supabase）: 台帳側 ----------
+ * config.js に接続先があるときだけ有効（cloudMode）。設定類は stores.doc、予約は reservations 行として保存し、
+ * 他端末・予約サイトからの変更はリアルタイムで反映する。秘密情報（Claude キー）はクラウドへ送らず端末内のみ。 */
+const cloudSync = { resSnap: new Map(), docSnap: '', queue: Promise.resolve(), unsubscribe: null, reloadTimer: null, saving: 0, ready: false, ignoreLocal: false };
+const SECRET_KEYS = ['claudeApiKey', 'claudeApiKeyEnc'];
+function secretsKey(id) { return `yoyaku-secrets:${id}`; }
+function secretsGet(id) { try { return JSON.parse(localStorage.getItem(secretsKey(id))) || {}; } catch (e) { return {}; } }
+function secretsSet(id, obj) { localStorage.setItem(secretsKey(id), JSON.stringify(obj)); }
+/* クラウドに保存する設定 JSON（予約と秘密情報を除く） */
+function docOf(st) {
+  const doc = JSON.parse(JSON.stringify(st));
+  delete doc.reservations;
+  if (doc.settings) SECRET_KEYS.forEach((k) => { delete doc.settings[k]; });
+  return doc;
+}
+function setCloudStatus(kind, msg) {
+  const el = document.getElementById('cloudStatus');
+  if (!el) return;
+  el.className = 'cloud-status ' + kind;
+  el.textContent = msg || '';
+  el.classList.toggle('hidden', !msg);
+}
+function showAuth(show, msg) {
+  document.getElementById('authScreen').classList.toggle('hidden', !show);
+  document.getElementById('authMsg').textContent = msg || '';
+  if (show) setTimeout(() => document.getElementById('authEmail').focus(), 50);
+}
+async function loadState() { if (cloudMode) await loadCloud(); else load(); }
+
+async function loadCloud() {
+  const id = registry.currentId;
+  const { store, reservations } = await Cloud.loadStore(id);
+  if (!store) {
+    // クラウドに無い店舗: 端末内のデータがあればそれを移行、無ければ初期状態で作成
+    let parsed = null;
+    if (!cloudSync.ignoreLocal) { try { parsed = JSON.parse(localStorage.getItem(dataKey(id))); } catch (e) { parsed = null; } }
+    state = parsed || defaultState();
+    if (!parsed) state.reservations = [];
+    migrateState();
+    await Cloud.saveDoc(id, currentStore().name, docOf(state));
+    await Cloud.upsertReservations(id, state.reservations);
+  } else {
+    state = Object.assign({}, store.doc, { reservations: reservations || [] });
+    if (migrateState()) await Cloud.saveDoc(id, store.name || currentStore().name, docOf(state));
+  }
+  Object.assign(state.settings, secretsGet(id));
+  cloudSync.resSnap = new Map(state.reservations.map((r) => [r.id, JSON.stringify(r)]));
+  cloudSync.docSnap = JSON.stringify(docOf(state));
+  cloudSync.ready = true;
+  subscribeCloud(id);
+}
+
+/* 変更分だけをクラウドへ書き込む（予約は行単位の差分、設定は JSON 全体） */
+function saveCloud() {
+  if (!cloudSync.ready) return;
+  const id = registry.currentId;
+  secretsSet(id, { claudeApiKey: state.settings.claudeApiKey || '', claudeApiKeyEnc: state.settings.claudeApiKeyEnc || '' });
+  const cur = new Map(state.reservations.map((r) => [r.id, JSON.stringify(r)]));
+  const changed = state.reservations.filter((r) => cloudSync.resSnap.get(r.id) !== cur.get(r.id)).map((r) => JSON.parse(JSON.stringify(r)));
+  const removed = [...cloudSync.resSnap.keys()].filter((k) => !cur.has(k));
+  const docNow = JSON.stringify(docOf(state));
+  const docChanged = docNow !== cloudSync.docSnap;
+  cloudSync.resSnap = cur;
+  cloudSync.docSnap = docNow;
+  if (!changed.length && !removed.length && !docChanged) return;
+  const name = currentStore().name;
+  cloudSync.saving += 1;
+  cloudSync.queue = cloudSync.queue.then(async () => {
+    try {
+      if (docChanged) await Cloud.saveDoc(id, name, JSON.parse(docNow));
+      if (changed.length) await Cloud.upsertReservations(id, changed);
+      if (removed.length) await Cloud.deleteReservations(removed);
+      setCloudStatus('ok', '');
+    } catch (e) {
+      setCloudStatus('error', `${t('cloudSaveError')} ${e.message || ''}`);
+      // 失敗分は次回の保存で再送されるようにスナップショットを戻す
+      changed.forEach((r) => cloudSync.resSnap.delete(r.id));
+      if (docChanged) cloudSync.docSnap = '';
+    } finally {
+      cloudSync.saving -= 1;
+    }
+  });
+}
+function subscribeCloud(id) {
+  if (cloudSync.unsubscribe) { try { cloudSync.unsubscribe(); } catch (e) { /* ignore */ } }
+  cloudSync.unsubscribe = Cloud.subscribe(id, () => {
+    clearTimeout(cloudSync.reloadTimer);
+    cloudSync.reloadTimer = setTimeout(reloadFromCloud, 400);
+  });
+}
+/* 他端末・予約サイトの変更を取り込む */
+async function reloadFromCloud() {
+  if (!cloudMode || !cloudSync.ready) return;
+  if (cloudSync.saving > 0) { cloudSync.reloadTimer = setTimeout(reloadFromCloud, 500); return; }
+  const id = registry.currentId;
+  try {
+    const { store, reservations } = await Cloud.loadStore(id);
+    if (!store) return;
+    const secrets = {};
+    SECRET_KEYS.forEach((k) => { secrets[k] = state.settings[k]; });
+    state = Object.assign({}, store.doc, { reservations: reservations || [] });
+    migrateState();
+    Object.assign(state.settings, secrets);
+    cloudSync.resSnap = new Map(state.reservations.map((r) => [r.id, JSON.stringify(r)]));
+    cloudSync.docSnap = JSON.stringify(docOf(state));
+    if (store.name && currentStore().name !== store.name) { currentStore().name = store.name; saveRegistry(); }
+    renderAll();
+  } catch (e) {
+    setCloudStatus('error', `${t('cloudLoadError')} ${e.message || ''}`);
+  }
+}
+/* 店舗一覧をクラウドから。クラウドが空なら端末内データの移行を確認 */
+async function syncStoresFromCloud() {
+  const list = await Cloud.listStores();
+  if (list.length) {
+    registry.stores = list.map((s) => ({ id: s.id, name: s.name || s.id }));
+  } else {
+    const localStores = registry.stores.filter((s) => localStorage.getItem(dataKey(s.id)));
+    if (localStores.length && confirm(t('cloudMigrateConfirm'))) {
+      for (const s of localStores) {
+        let data = null;
+        try { data = JSON.parse(localStorage.getItem(dataKey(s.id))); } catch (e) { data = null; }
+        if (!data) continue;
+        await Cloud.saveDoc(s.id, s.name, docOf(data));
+        await Cloud.upsertReservations(s.id, data.reservations || []);
+        secretsSet(s.id, { claudeApiKey: (data.settings || {}).claudeApiKey || '', claudeApiKeyEnc: (data.settings || {}).claudeApiKeyEnc || '' });
+      }
+      registry.stores = localStores.map((s) => ({ id: s.id, name: s.name }));
+    } else {
+      cloudSync.ignoreLocal = true;
+      registry.stores = [{ id: 'st1', name: DEFAULT_STORE_INFO.storeName }];
+    }
+  }
+  if (!registry.stores.some((s) => s.id === registry.currentId)) registry.currentId = registry.stores[0].id;
+  saveRegistry();
+}
+async function afterLogin(sessionObj) {
+  try {
+    setCloudStatus('info', t('cloudLoading'));
+    await syncStoresFromCloud();
+    await loadCloud();
+    await loadSessionKeys();
+    showAuth(false);
+    setCloudStatus('ok', '');
+    const who = document.getElementById('cloudUser');
+    if (who) who.textContent = t('cloudSignedInAs').replace('{email}', (sessionObj && sessionObj.user && sessionObj.user.email) || '');
+    renderAll();
+  } catch (e) {
+    setCloudStatus('error', `${t('cloudLoadError')} ${e.message || ''}`);
+  }
+}
+async function doSignIn() {
+  const email = document.getElementById('authEmail').value.trim();
+  const pw = document.getElementById('authPassword').value;
+  const btn = document.getElementById('btnSignIn');
+  if (!email || !pw) return;
+  btn.disabled = true;
+  try {
+    const s = await Cloud.signIn(email, pw);
+    document.getElementById('authPassword').value = '';
+    await afterLogin(s);
+  } catch (e) {
+    showAuth(true, `${t('authError')} ${e.message || ''}`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+async function doSignOut() {
+  document.getElementById('settingsModal').classList.add('hidden');
+  await Cloud.signOut();
+  cloudSync.ready = false;
+  if (cloudSync.unsubscribe) { try { cloudSync.unsubscribe(); } catch (e) { /* ignore */ } cloudSync.unsubscribe = null; }
+  state = defaultState();
+  state.reservations = [];
+  renderAll();
+  showAuth(true);
+}
+
 /* ---------- 端末ロック（PIN）と API キーの保護 ----------
  * PIN は塩付き SHA-256 で店舗共通の registry に保存。Claude API キーは PIN から PBKDF2 で導出した鍵（AES-GCM）で
  * 暗号化して保存し、ロック解除中だけメモリ上で保持する。（Google のキーは予約サイト側でも必要なため平文のまま。
@@ -1995,6 +2187,17 @@ function getClaudeKey() { return (sessionKeys.claude || state.settings.claudeApi
 
 /* 全店舗の Claude キーを（旧鍵で復号 →）新鍵で暗号化、または平文に戻す */
 async function reencryptKeysAllStores(oldKey, newKey) {
+  if (cloudMode) {
+    for (const s of registry.stores) {
+      const sec = secretsGet(s.id);
+      let plain = sec.claudeApiKey || '';
+      if (sec.claudeApiKeyEnc && oldKey) { try { plain = await decryptStr(oldKey, sec.claudeApiKeyEnc); } catch (e) { plain = ''; } }
+      secretsSet(s.id, newKey ? { claudeApiKey: '', claudeApiKeyEnc: plain ? await encryptStr(newKey, plain) : '' } : { claudeApiKey: plain, claudeApiKeyEnc: '' });
+    }
+    Object.assign(state.settings, secretsGet(registry.currentId));
+    await loadSessionKeys();
+    return;
+  }
   for (const s of registry.stores) {
     const raw = localStorage.getItem(dataKey(s.id));
     if (!raw) continue;
@@ -2832,8 +3035,19 @@ function importJsonFile(file) {
       if (!Array.isArray(data.reservations) || !Array.isArray(data.tables) || !data.settings || typeof data.settings !== 'object') throw new Error('invalid');
       ['sites', 'courses', 'tags', 'combos'].forEach((k) => { if (data[k] != null && !Array.isArray(data[k])) throw new Error('invalid'); });
       if (!confirm(t('importConfirm'))) return;
-      localStorage.setItem(dataKey(registry.currentId), JSON.stringify(data));
-      load(); // 旧形式の移行処理も適用
+      if (cloudMode) {
+        // クラウド: 復元内容で全置換（無くなった予約は削除、残りは差分で再送）
+        const oldSnap = cloudSync.resSnap;
+        state = data;
+        migrateState();
+        Object.assign(state.settings, secretsGet(registry.currentId));
+        cloudSync.resSnap = new Map([...oldSnap.keys()].map((k) => [k, '__stale__']));
+        cloudSync.docSnap = '';
+        save();
+      } else {
+        localStorage.setItem(dataKey(registry.currentId), JSON.stringify(data));
+        load(); // 旧形式の移行処理も適用
+      }
       // 復元データに平文の Claude キーがあり、ロックが有効なら暗号化し直す
       if (lockEnabled() && lockState.cryptoKey) reencryptKeysAllStores(lockState.cryptoKey, lockState.cryptoKey);
       else loadSessionKeys();
@@ -2911,9 +3125,20 @@ function shiftDate(days) {
 }
 
 /* ---------- init ---------- */
-function init() {
+async function init() {
   loadRegistry();
-  load();
+  if (cloudMode) {
+    Cloud.init();
+    state = defaultState();
+    state.reservations = [];   // ログイン完了までの仮の状態
+    document.getElementById('cloudSection').classList.remove('hidden');
+    document.getElementById('btnSignIn').addEventListener('click', doSignIn);
+    document.getElementById('authPassword').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSignIn(); });
+    document.getElementById('btnSignOut').addEventListener('click', doSignOut);
+    Cloud.onAuth((s) => { if (!s) { cloudSync.ready = false; showAuth(true); } });
+  } else {
+    load();
+  }
 
   // 店舗の切替・追加
   document.getElementById('storeSwitch').addEventListener('change', (e) => {
@@ -3056,6 +3281,7 @@ function init() {
 
   // 別タブ（自社予約サイト等）での予約を即時反映
   window.addEventListener('storage', (e) => {
+    if (cloudMode) return;   // クラウド時はリアルタイム購読で反映
     if (e.key === LS_REGISTRY) { loadRegistry(); load(); renderAll(); }
     else if (e.key === dataKey(registry.currentId)) { load(); renderAll(); }
   });
@@ -3137,6 +3363,12 @@ function init() {
   });
 
   renderAll();
+  if (cloudMode) {
+    try {
+      const s = await Cloud.session();
+      if (s) afterLogin(s); else showAuth(true);
+    } catch (e) { showAuth(true, `${t('authError')} ${e.message || ''}`); }
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);

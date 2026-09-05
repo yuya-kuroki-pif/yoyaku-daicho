@@ -27,6 +27,7 @@ const EXTRA_KEYS = ['storePrivateRoom', 'storeCharter', 'storeSmoking', 'storePa
 const T = {
   ja: {
     title: 'ネット予約',
+    loading: '読み込み中…',
     tabTop: 'トップ', tabMenu: 'メニュー・コース', tabPhoto: '写真', tabReview: '口コミ', tabMap: '地図・店舗情報',
     crumbHome: 'トップ', station: '最寄り', reservableYes: 'ネット予約可', reservablePhone: '電話予約のみ', hasCourse: 'コースあり',
     basicInfo: '店舗基本情報', quickHead: '空席確認・予約', quickNote: '日付をタップすると予約画面に進みます（○ 空きあり ／ × 満席 ／ 定休日）',
@@ -89,6 +90,7 @@ const T = {
   },
   vi: {
     title: 'Đặt bàn trực tuyến',
+    loading: 'Đang tải…',
     tabTop: 'Trang chủ', tabMenu: 'Thực đơn & Course', tabPhoto: 'Ảnh', tabReview: 'Đánh giá', tabMap: 'Bản đồ & Thông tin',
     crumbHome: 'Trang chủ', station: 'Ga gần nhất', reservableYes: 'Đặt bàn online', reservablePhone: 'Chỉ đặt qua điện thoại', hasCourse: 'Có course',
     basicInfo: 'Thông tin cơ bản', quickHead: 'Kiểm tra chỗ trống & đặt bàn', quickNote: 'Chạm vào ngày để đến màn hình đặt bàn (○ còn chỗ / × hết chỗ / ngày nghỉ)',
@@ -195,7 +197,20 @@ function dataKeyName() {
   try { const reg = JSON.parse(localStorage.getItem(LS_REGISTRY)); if (reg && reg.currentId) return `${LS_KEY}:${reg.currentId}`; } catch (e) { /* ignore */ }
   return LS_KEY;
 }
-function db() { try { return JSON.parse(localStorage.getItem(dataKeyName())); } catch (e) { return null; } }
+/* クラウド時: 店舗の公開情報＋期間内の占有状況（個人情報なし）をキャッシュして同期的に使う */
+let cloudSt = null;
+let cloudErr = '';
+async function refreshCloud() {
+  if (!storeParam) { cloudSt = null; cloudErr = 'nostore'; return; }
+  const [store, occ] = await Promise.all([Cloud.bookingStore(storeParam), Cloud.bookingOccupancy(storeParam, todayStr(), maxDateStr())]);
+  if (!store) { cloudSt = null; cloudErr = 'nostore'; return; }
+  cloudErr = '';
+  cloudSt = { settings: store.settings || {}, tables: store.tables || [], sites: store.sites || [], courses: store.courses || [], combos: store.combos || [], reservations: occ };
+}
+function db() {
+  if (Cloud.enabled) return cloudSt;
+  try { return JSON.parse(localStorage.getItem(dataKeyName())); } catch (e) { return null; }
+}
 function saveDb(st) { localStorage.setItem(dataKeyName(), JSON.stringify(st)); }
 /* 店舗設定。台帳で未入力の項目は Google マップの情報（取得済みのとき）で補完する */
 function settings(st) {
@@ -355,6 +370,7 @@ function starsHtml(rating) {
 
 /* ---------- 描画 ---------- */
 function render() {
+  if (Cloud.enabled && !cloudSt && !cloudErr) { document.getElementById('content').innerHTML = `<div class="closed">${esc(t('loading'))}</div>`; return; }
   const st = db();
   document.documentElement.lang = lang;
   const s = settings(st);
@@ -1047,19 +1063,39 @@ function bindLookup(el) {
   el.querySelector('#btnLookup').addEventListener('click', doLookup);
   el.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', () => cancelReservation(b.dataset.cancel)));
 }
-function doLookup() {
+async function doLookup() {
   const st = db();
   const p = normPhone(lookup.phone);
   const code = String(lookup.code || '').trim().toUpperCase();
   lookup.msgOk = false;
+  if (Cloud.enabled) {
+    if (p.length < 10 || !code) { lookup.results = null; lookup.msg = t('notFound'); render(); return; }
+    try {
+      const found = await Cloud.bookingLookup(storeParam, lookup.phone, code);
+      lookup.results = found;
+      lookup.msg = found.length ? '' : t('notFound');
+    } catch (e) { lookup.results = null; lookup.msg = t('notFound'); }
+    render();
+    return;
+  }
   if (!st || p.length < 10 || !code) { lookup.results = null; lookup.msg = t('notFound'); render(); return; }
   const found = st.reservations.filter((r) => normPhone(r.phone) === p && String(r.code || '').toUpperCase() === code);
   lookup.results = found;
   lookup.msg = found.length ? '' : t('notFound');
   render();
 }
-function cancelReservation(id) {
+async function cancelReservation(id) {
   if (!confirm(t('cancelConfirm'))) return;
+  if (Cloud.enabled) {
+    try {
+      const done = await Cloud.bookingCancel(storeParam, lookup.phone, lookup.code, id);
+      lookup.msg = done ? t('cancelDone') : t('notFound');
+      lookup.msgOk = done;
+      lookup.results = await Cloud.bookingLookup(storeParam, lookup.phone, lookup.code);
+    } catch (e) { lookup.msg = t('notFound'); lookup.msgOk = false; }
+    render();
+    return;
+  }
   const st = db();
   const r = st && st.reservations.find((x) => x.id === id);
   if (!r) { lookup.msg = t('notFound'); render(); return; }
@@ -1122,7 +1158,7 @@ function shiftCal(n) {
   render();
 }
 
-function submit() {
+async function submit() {
   const st = db();
   const site = st && ownSite(st);
   if (!site || !site.enabled) { render(); return; }
@@ -1132,8 +1168,28 @@ function submit() {
   const assign = findAssignment(st, site, sel.date, sel.time, sel.adults);
   if (!assign) { fail(t('taken')); return; }
 
-  const now = new Date().toISOString();
   const d = draftRes();
+  if (Cloud.enabled) {
+    // サーバー側（RPC）で必須項目・受付状態・重複を再検証して登録
+    try {
+      const created = await Cloud.bookingCreate(storeParam, {
+        date: d.date, start: d.start, duration: DUR, adults: d.adults, children: d.children,
+        name: d.name, kana: d.kana.trim(), phone: d.phone, email: d.email, purpose: d.purpose ? Number(d.purpose) : '',
+        tableIds: assign, courses: d.courses, memo: d.memo.trim(), channel: site.id,
+      });
+      doneRes = created;
+      await refreshCloud();
+    } catch (e) {
+      const m = String(e.message || '');
+      try { await refreshCloud(); } catch (err) { /* ignore */ }
+      if (m.includes('closed')) fail(t('closed')); else fail(t('taken'));
+      return;
+    }
+    render();
+    window.scrollTo(0, 0);
+    return;
+  }
+  const now = new Date().toISOString();
   const res = {
     id: uid(),
     code: genCode(),
@@ -1185,6 +1241,13 @@ document.getElementById('siteTabs').addEventListener('click', (e) => {
 document.getElementById('ctaReserve').addEventListener('click', openReserve);
 window.addEventListener('hashchange', () => { if (location.hash === '#reserve' && view !== 'reserve') openReserve(); });
 // 台帳側の変更（予約・設定）を即時反映
-window.addEventListener('storage', (e) => { if (e.key === dataKeyName() || e.key === LS_REGISTRY) { google.status = 'idle'; render(); } });
+window.addEventListener('storage', (e) => { if (Cloud.enabled) return; if (e.key === dataKeyName() || e.key === LS_REGISTRY) { google.status = 'idle'; render(); } });
 
-render();
+if (Cloud.enabled) {
+  Cloud.init();
+  render();
+  refreshCloud().then(render).catch((e) => { cloudErr = e.message || 'error'; render(); });
+  setInterval(() => { if (view === 'reserve' && !doneRes) refreshCloud().then(render).catch(() => {}); }, 60000);   // 空席状況を定期更新
+} else {
+  render();
+}
