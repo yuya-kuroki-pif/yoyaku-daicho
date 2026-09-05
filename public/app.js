@@ -458,9 +458,10 @@ function renderTimetable() {
         `<div class="b-info">${fmtTime(r.start)}-${fmtTime(r.start + r.duration)}</div>`;
     } else {
       const info = r.memo ? esc(r.memo) : `${fmtTime(r.start)}-${fmtTime(r.start + r.duration)}`;
+      const tagsHtml = tagNames(r.tags).map((n) => `<span class="b-tag">${esc(n)}</span>`).join('');
       block.innerHTML =
         `<div class="b-name">${blockNameHtml(r, visitMap)}</div>` +
-        `<div class="b-info">${info}</div>`;
+        `<div class="b-info">${tagsHtml}${info}</div>`;
     }
 
     // 右端: 滞在時間変更ハンドル
@@ -617,11 +618,12 @@ function renderTimetable() {
 
 function renderLegend() {
   const items = [
-    { color: '#fff', label: statusLabel('reserved') },
-    { color: 'var(--green-bg)', label: `${statusLabel('reserved')}(${t('course')})` },
-    { color: 'var(--slate)', label: statusLabel('seated') },
-    { color: 'var(--gray-block)', label: statusLabel('finished') },
+    { color: 'var(--blue)', label: statusLabel('reserved') },
+    { color: 'linear-gradient(90deg, var(--green) 0 35%, var(--blue) 35%)', label: `${statusLabel('reserved')}(${t('course')})` },
+    { color: 'var(--green)', label: statusLabel('seated') },
+    { color: '#9aa7af', label: statusLabel('finished') },
     { color: 'var(--red)', label: statusLabel('noshow') },
+    { color: 'repeating-linear-gradient(135deg, #9aa7af 0 6px, #c2cbd1 6px 8px)', label: statusLabel('cancelled') },
     { color: 'var(--pink-bg)', label: t('unassigned') },
     { color: 'repeating-linear-gradient(45deg, #e2e8ee 0 4px, #f6f8fa 4px 8px)', label: statusLabel('block') },
   ];
@@ -891,7 +893,7 @@ function renderList() {
       `<div class="rc-time">${global ? `<small class="rc-date">${esc(fmtYmd(r.date))}</small>` : ''}${fmtTime(r.start)}<small>${fmtTime(r.start + r.duration)}</small></div>` +
       `<div class="rc-main">` +
         `<div class="rc-name">${blockNameHtml(r, visitMap)}</div>` +
-        `<div class="rc-sub">${esc(tableNames(r.tableIds))}${site ? '　🌐 ' + esc(site.name) : ''}${r.phone ? '　📞 ' + esc(r.phone) : ''}${r.code ? '　🔖 ' + esc(r.code) : ''}${resHasCourse(r) ? '　🍴 ' + esc(resCourseText(r)) : ''}${r.memo ? '　📝 ' + esc(r.memo) : ''}</div>` +
+        `<div class="rc-sub">${esc(tableNames(r.tableIds))}${site ? '　🌐 ' + esc(site.name) : ''}${r.phone ? '　📞 ' + esc(r.phone) : ''}${r.code ? '　🔖 ' + esc(r.code) : ''}${tagNames(r.tags).length ? '　🏷 ' + esc(tagNames(r.tags).join('・')) : ''}${resHasCourse(r) ? '　🍴 ' + esc(resCourseText(r)) : ''}${r.memo ? '　📝 ' + esc(r.memo) : ''}</div>` +
       `</div>` +
       `<div class="rc-actions">${quick}<span class="status-chip ${r.status}">${esc(statusLabel(r.status))}</span></div>`;
     card.addEventListener('click', () => openResModal(r.id));
@@ -1626,7 +1628,11 @@ function renderModalStatus() {
     b.type = 'button';
     b.className = 'status-btn ' + s + (modalStatus === s ? ' active' : '');
     b.textContent = statusLabel(s);
-    b.addEventListener('click', () => { modalStatus = s; renderModalStatus(); });
+    b.addEventListener('click', () => {
+      if (s === 'cancelled' && modalStatus !== 'cancelled' && !confirm(t('cancelResConfirm'))) return;
+      modalStatus = s;
+      renderModalStatus();
+    });
     row.appendChild(b);
   });
 }
@@ -1743,6 +1749,7 @@ function defaultStart() {
 function closeResModal() {
   document.getElementById('resModal').classList.add('hidden');
   editingId = null;
+  pendingAiCard = null;
 }
 
 function hasConflict(res) {
@@ -1801,6 +1808,7 @@ function saveReservation() {
   const idx = state.reservations.findIndex((x) => x.id === res.id);
   if (idx >= 0) state.reservations[idx] = res; else state.reservations.push(res);
   save();
+  if (pendingAiCard) { markAiCardDone(pendingAiCard, res); pendingAiCard = null; }
   closeResModal();
   renderAll();
 }
@@ -2795,13 +2803,39 @@ function renderExtraction(info, hintText) {
     `<table class="ai-table">${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>` +
     (missing.length ? `<div class="ai-missing">⚠ ${esc(t('aiMissing'))}: ${esc(missing.join('・'))}</div>` : '') +
     (info.notes ? `<div class="ai-notes">${esc(info.notes)}</div>` : '') +
-    `<button type="button" class="btn primary small ai-open">${esc(t('aiOpenForm'))}</button>`;
+    `<div class="ai-actions">` +
+      `<button type="button" class="btn primary small ai-register" ${info.date && info.time && info.name ? '' : 'disabled'}>${esc(t('aiRegister'))}</button>` +
+      `<button type="button" class="btn ghost small ai-open">${esc(t('aiOpenForm'))}</button>` +
+    `</div>`;
+  // フォームで確認して登録（保存後にカードを完了表示）
   card.querySelector('.ai-open').addEventListener('click', () => {
     const p = extractionToPrefill(info);
     if (p.date) { currentDate = p.date; }
+    pendingAiCard = card;
     openResModal(null, p);
   });
+  // この内容でそのまま登録（席は未配席。あとでタイムラインで配席）
+  card.querySelector('.ai-register').addEventListener('click', () => {
+    const p = extractionToPrefill(info);
+    if (!p.date || p.start == null) return;
+    const now = new Date().toISOString();
+    const res = { id: uid(), date: p.date, start: p.start, duration: 120, end: p.start + 120, adults: p.copy.adults, children: p.copy.children,
+      name: lim(p.copy.name, 100), kana: lim(p.copy.kana, 100), phone: lim(p.copy.phone, 40), email: '', purpose: '', tableIds: [], courses: p.copy.courses, tags: [],
+      memo: lim(p.copy.memo, 2000), status: 'reserved', walkIn: false, channel: p.channel || '', createdAt: now, updatedAt: now };
+    state.reservations.push(res);
+    save();
+    currentDate = res.date;
+    markAiCardDone(card, res);
+    renderAll();
+  });
   chatAppendNode('bot', card);
+}
+
+let pendingAiCard = null;   // フォームで確認中の読み取りカード
+function markAiCardDone(card, res) {
+  const acts = card.querySelector('.ai-actions');
+  if (acts) acts.innerHTML = `<div class="ai-done">✅ ${esc(t('chatRegistered'))}</div>`;
+  chatAppend('bot', `✅ ${chatSummary(res.date, res.start, res.duration, res.tableIds, res.name, (res.adults || 0) + (res.children || 0))} — ${t('chatDone')}${(res.tableIds || []).length ? '' : '\n' + t('chatAssignHint')}`);
 }
 
 /* 画像の受け取り（添付ボタン・貼り付け・ドロップ共通） */
@@ -3017,6 +3051,7 @@ function chatExecute(text) {
     if (!name) return t('chatNeedName');
     const r = chatFindRes(name, date);
     if (!r) return t('chatNotFound');
+    if (!confirm(`${t('cancelResConfirm')}\n${chatSummary(r.date, r.start, r.duration, r.tableIds, r.name)}`)) return t('chatAborted');
     r.status = 'cancelled';
     save();
     renderAll();

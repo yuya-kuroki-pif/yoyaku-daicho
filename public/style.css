@@ -229,23 +229,28 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
   padding: 0 3px; line-height: 1.5; opacity: .9; flex: none;
 }
 .b-ico { font-size: 11px; flex: none; }
+/* ブロック内のタグ */
+.b-tag { display: inline-block; font-size: 9px; font-weight: 700; background: rgba(255,255,255,.25); border: 1px solid rgba(255,255,255,.45); border-radius: 3px; padding: 0 3px; margin-right: 3px; line-height: 1.5; vertical-align: middle; }
+.tt-block.unassigned .b-tag { background: rgba(229,72,77,.1); border-color: rgba(229,72,77,.4); color: var(--red); }
 
 /* 予約（白＋グレー枠） */
-.tt-block.reserved { border-color: var(--line-strong); color: var(--text); }
+/* ブロックの色は予約編集画面のステータスボタンと同じ（予約=青、来店中=緑、退店済/キャンセル=グレー、ノーショー=赤） */
+.tt-block.reserved { background: var(--blue); border-color: var(--blue); color: #fff; }
 /* コース付き予約（薄緑＋緑枠） */
-.tt-block.reserved.course { background: var(--green-bg); border-color: var(--green-border); color: #14532d; }
-.tt-block.reserved.course .b-name { color: #166534; }
+.tt-block.reserved.course { border-left: 5px solid var(--green); }
+.tt-block.reserved.course .b-name { color: #fff; }
 /* 来店中（濃紺） */
-.tt-block.seated { background: var(--slate); border-color: var(--slate); color: #fff; }
+.tt-block.seated { background: var(--green); border-color: var(--green); color: #fff; }
 /* 退店済（グレー） */
-.tt-block.finished { background: var(--gray-block); border-color: var(--gray-block); color: var(--muted); }
+.tt-block.finished { background: #9aa7af; border-color: #9aa7af; color: #fff; }
 /* ノーショー（赤） */
 .tt-block.noshow { background: var(--red); border-color: var(--red); color: #fff; }
-.tt-block.cancelled { background: var(--gray-block); color: var(--muted); text-decoration: line-through; }
+.tt-block.cancelled { background: repeating-linear-gradient(135deg, #9aa7af 0 6px, #b5bfc6 6px 8px); border-color: #9aa7af; color: #fff; text-decoration: line-through; }
 /* 未配席（ピンク＋赤点線） */
 .tt-block.unassigned {
   background: #fff5f5; border: 1.5px dashed var(--red); color: var(--red);
 }
+.tt-block.unassigned.reserved, .tt-block.unassigned { background: var(--pink-bg); color: var(--text); }
 .tt-block.unassigned .b-name { color: var(--red); }
 /* 予約ブロック（斜線ストライプ・ネット予約在庫から除外） */
 .tt-block.block {
@@ -341,7 +346,7 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
   border-radius: 12px; padding: 12px 16px; margin-bottom: 10px; cursor: pointer;
 }
 .res-card.course { background: var(--green-bg); border-color: var(--green-border); }
-.res-card.seated { background: var(--slate); border-color: var(--slate); color: #fff; }
+.res-card.seated { background: var(--green); border-color: var(--green); color: #fff; }
 .res-card.seated .rc-sub, .res-card.seated .rc-time small { color: rgba(255,255,255,.75); }
 .res-card.finished { opacity: .6; }
 .res-card.noshow { border-color: var(--red); background: var(--pink-bg); }
@@ -807,3 +812,8 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
 .extra-row input { border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; font-size: 15px; min-height: 44px; min-width: 0; }
 .extra-row .icon-btn { color: var(--red); }
 @media (max-width: 700px) { .extra-row { grid-template-columns: 1fr 1fr 36px; } }
+
+/* 読み取りカードの操作 */
+.ai-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ai-actions .btn { flex: 1; justify-content: center; }
+.ai-done { font-weight: 800; color: var(--green); padding: 6px 0; }
