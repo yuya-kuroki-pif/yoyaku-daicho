@@ -8,7 +8,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=32">
+  <link rel="stylesheet" href="style.css?v=33">
 </head>
 <body>
   <!-- dinii風 細線SVGアイコン定義 -->
@@ -36,6 +36,10 @@
     <symbol id="ic-gear" viewBox="0 0 24 24">
       <circle cx="12" cy="12" r="3"/>
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </symbol>
+    <symbol id="ic-shield" viewBox="0 0 24 24">
+      <path d="M12 2l8 3v6c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V5l8-3z"/>
+      <path d="M9 12l2 2 4-4"/>
     </symbol>
     <symbol id="ic-plus" viewBox="0 0 24 24">
       <line x1="12" y1="5" x2="12" y2="19"/>
@@ -67,6 +71,10 @@
     <button class="rail-btn" id="railSettings">
       <span class="rail-ic"><svg class="ic"><use href="#ic-gear"/></svg></span>
       <span class="rail-label" data-i18n="settings"></span>
+    </button>
+    <button class="rail-btn" id="railAdmin">
+      <span class="rail-ic"><svg class="ic"><use href="#ic-shield"/></svg></span>
+      <span class="rail-label" data-i18n="adminSettings"></span>
     </button>
     <button class="rail-btn" data-view="sites">
       <span class="rail-ic"><svg class="ic"><use href="#ic-globe"/></svg></span>
@@ -104,6 +112,7 @@
         <button id="btnChatPhone" class="icon-btn phone-only"><svg class="ic"><use href="#ic-chat"/></svg></button>
         <button id="btnSitesPhone" class="icon-btn phone-only"><svg class="ic"><use href="#ic-globe"/></svg></button>
         <button id="btnSettings" class="icon-btn phone-only"><svg class="ic"><use href="#ic-gear"/></svg></button>
+        <button id="btnAdminPhone" class="icon-btn phone-only"><svg class="ic"><use href="#ic-shield"/></svg></button>
         <div class="lang-switch" id="langSwitch">
           <button data-lang="ja">日本語</button>
           <button data-lang="vi">Tiếng Việt</button>
@@ -324,33 +333,7 @@
         <button class="icon-btn" id="btnSetClose">✕</button>
       </div>
       <div class="modal-body">
-        <h3 class="combo-heading" style="margin-top:0" data-i18n="storeMgmtHeading"></h3>
-        <p class="combo-note" data-i18n="storeMgmtNote"></p>
-        <div class="backup-actions">
-          <button type="button" class="btn ghost" id="btnAddStore">＋ <span data-i18n="addStoreBtn2"></span></button>
-          <button type="button" class="btn danger" id="btnDeleteStore"><span data-i18n="deleteStoreBtn"></span></button>
-        </div>
-        <div id="cloudSection" class="hidden">
-          <h3 class="combo-heading" data-i18n="cloudHeading"></h3>
-          <p class="combo-note" data-i18n="cloudNote"></p>
-          <p class="lock-status" id="cloudUser"></p>
-          <div class="backup-actions"><button type="button" class="btn ghost" id="btnSignOut"><span data-i18n="cloudSignOut"></span></button></div>
-        </div>
-
-        <h3 class="combo-heading" data-i18n="lockHeading"></h3>
-        <p class="combo-note" data-i18n="lockNote"></p>
-        <p class="lock-status" id="lockStatus"></p>
-        <div class="form-grid">
-          <div class="field"><label data-i18n="lockPinLabel"></label><input type="password" id="sLockPin" inputmode="numeric" maxlength="8" autocomplete="new-password"></div>
-          <div class="field"><label data-i18n="lockPin2Label"></label><input type="password" id="sLockPin2" inputmode="numeric" maxlength="8" autocomplete="new-password"></div>
-          <div class="field"><label data-i18n="lockMinutesLabel"></label><select id="sLockMinutes"><option value="5">5</option><option value="10">10</option><option value="30">30</option><option value="0" data-i18n="lockNever"></option></select></div>
-        </div>
-        <div class="backup-actions">
-          <button type="button" class="btn primary" id="btnLockSave">🔒 <span data-i18n="lockSaveBtn"></span></button>
-          <button type="button" class="btn danger hidden" id="btnLockClear"><span data-i18n="lockClearBtn"></span></button>
-        </div>
-
-        <h3 class="combo-heading" data-i18n="hoursHeading"></h3>
+        <h3 class="combo-heading" style="margin-top:0" data-i18n="hoursHeading"></h3>
         <div class="form-grid">
           <div class="field">
             <label data-i18n="openTime"></label>
@@ -402,32 +385,13 @@
           <div class="field span3"><label data-i18n="storePaymentLabel"></label><input type="text" id="sStorePayment" data-i18n-placeholder="storePaymentPlaceholder"></div>
           <div class="field span3"><label data-i18n="storeCatchLabel"></label><input type="text" id="sStoreCatch" data-i18n-placeholder="storeCatchPlaceholder"></div>
           <div class="field span3"><label data-i18n="storeDescLabel"></label><textarea id="sStoreDescription" rows="4"></textarea></div>
-          <div class="field span3"><label data-i18n="storePhotosLabel"></label><textarea id="sStorePhotos" rows="3" data-i18n-placeholder="storePhotosPlaceholder"></textarea></div>
           <div class="field span3"><label data-i18n="storeNoticeLabel"></label><textarea id="sStoreNote" rows="3" data-i18n-placeholder="storeNoticePlaceholder"></textarea></div>
         </div>
 
         <h3 class="combo-heading" data-i18n="storeDetailHeading"></h3>
         <p class="combo-note" data-i18n="storeDetailNote"></p>
-        <div class="form-grid" id="storeExtraFields"></div>
-
-        <h3 class="combo-heading" data-i18n="aiHeading"></h3>
-        <p class="combo-note" data-i18n="aiNote"></p>
-        <div class="form-grid">
-          <div class="field span2"><label data-i18n="aiKeyLabel"></label><input type="password" id="sClaudeApiKey" placeholder="sk-ant-…" autocomplete="off"><label class="chk small-chk"><input type="checkbox" id="sClaudeShow"> <span data-i18n="showKey"></span></label></div>
-          <div class="field"><label data-i18n="aiDailyLimitLabel"></label><input type="number" id="sAiDailyLimit" min="1" max="1000"></div>
-        </div>
-
-        <h3 class="combo-heading" data-i18n="googleHeading"></h3>
-        <p class="combo-note" data-i18n="googleNote"></p>
-        <div class="form-grid">
-          <div class="field span2"><label data-i18n="googleFindLabel"></label><input type="text" id="sGoogleQuery" data-i18n-placeholder="googleFindPlaceholder" autocomplete="off"></div>
-          <div class="field"><label>&nbsp;</label><button type="button" class="btn primary" id="btnGoogleFind">🔍 <span data-i18n="googleFindBtn"></span></button></div>
-          <div class="field span3 hidden" id="googleCandidates"></div>
-          <div class="field span2"><label data-i18n="googlePlaceIdLabel"></label><input type="text" id="sGooglePlaceId" placeholder="ChIJ…"></div>
-          <div class="field"><label data-i18n="googleApiKeyLabel"></label><input type="password" id="sGoogleApiKey" placeholder="AIza…" autocomplete="off"><label class="chk small-chk"><input type="checkbox" id="sGoogleShow"> <span data-i18n="showKey"></span></label></div>
-          <div class="field span3"><button type="button" class="btn ghost" id="btnGoogleImport">📥 <span data-i18n="googleImportBtn"></span></button></div>
-          <div class="field span3"><a class="ext-link" href="https://developers.google.com/maps/documentation/places/web-service/place-id" target="_blank" rel="noopener" data-i18n="googleHelpLink"></a></div>
-        </div>
+        <div id="storeExtraRows"></div>
+        <button class="btn ghost full" id="btnAddExtra"><svg class="ic"><use href="#ic-plus"/></svg> <span data-i18n="addExtraBtn"></span></button>
 
         <h3 class="combo-heading" data-i18n="coursesHeading"></h3>
         <p class="combo-note" data-i18n="coursesNote"></p>
@@ -492,6 +456,56 @@
     </div>
   </div>
 
+  <!-- 管理者設定モーダル -->
+  <div class="modal-backdrop hidden" id="adminModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 data-i18n="adminSettings"></h2>
+        <button class="icon-btn" id="btnAdminClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <h3 class="combo-heading" style="margin-top:0" data-i18n="storeMgmtHeading"></h3>
+        <p class="combo-note" data-i18n="storeMgmtNote"></p>
+        <div id="adminStores"></div>
+        <button class="btn ghost full" id="btnAdminAddStore"><svg class="ic"><use href="#ic-plus"/></svg> <span data-i18n="addStoreBtn2"></span></button>
+        <div id="cloudSection" class="hidden">
+          <h3 class="combo-heading" data-i18n="cloudHeading"></h3>
+          <p class="combo-note" data-i18n="cloudNote"></p>
+          <p class="lock-status" id="cloudUser"></p>
+          <div class="backup-actions"><button type="button" class="btn ghost" id="btnSignOut"><span data-i18n="cloudSignOut"></span></button></div>
+        </div>
+
+        <h3 class="combo-heading" data-i18n="aiHeading"></h3>
+        <p class="combo-note" data-i18n="aiNote"></p>
+        <div class="form-grid">
+          <div class="field span2"><label data-i18n="aiKeyLabel"></label><input type="password" id="sClaudeApiKey" placeholder="sk-ant-…" autocomplete="off"><label class="chk small-chk"><input type="checkbox" id="sClaudeShow"> <span data-i18n="showKey"></span></label></div>
+          <div class="field"><label data-i18n="aiDailyLimitLabel"></label><input type="number" id="sAiDailyLimit" min="1" max="1000"></div>
+        </div>
+
+        <h3 class="combo-heading" data-i18n="googleHeading"></h3>
+        <p class="combo-note" data-i18n="googleNote"></p>
+        <div class="form-grid">
+          <div class="field span2"><label data-i18n="googleFindLabel"></label><input type="text" id="sGoogleQuery" data-i18n-placeholder="googleFindPlaceholder" autocomplete="off"></div>
+          <div class="field"><label>&nbsp;</label><button type="button" class="btn primary" id="btnGoogleFind">🔍 <span data-i18n="googleFindBtn"></span></button></div>
+          <div class="field span3 hidden" id="googleCandidates"></div>
+          <div class="field span2"><label data-i18n="googlePlaceIdLabel"></label><input type="text" id="sGooglePlaceId" placeholder="ChIJ…"></div>
+          <div class="field"><label data-i18n="googleApiKeyLabel"></label><input type="password" id="sGoogleApiKey" placeholder="AIza…" autocomplete="off"><label class="chk small-chk"><input type="checkbox" id="sGoogleShow"> <span data-i18n="showKey"></span></label></div>
+          <div class="field span3"><button type="button" class="btn ghost" id="btnGoogleImport">📥 <span data-i18n="googleImportBtn"></span></button></div>
+          <div class="field span3 checkbox-field" style="justify-content:flex-start;gap:20px;flex-direction:row;flex-wrap:wrap">
+            <label class="chk"><input type="checkbox" id="sShowReviews"> <span data-i18n="showReviewsLabel"></span></label>
+            <label class="chk"><input type="checkbox" id="sShowGooglePhotos"> <span data-i18n="showGooglePhotosLabel"></span></label>
+          </div>
+          <div class="field span3"><a class="ext-link" href="https://developers.google.com/maps/documentation/places/web-service/place-id" target="_blank" rel="noopener" data-i18n="googleHelpLink"></a></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <span class="spacer"></span>
+        <button class="btn ghost" id="btnAdminCancel" data-i18n="cancelBtn"></button>
+        <button class="btn primary" id="btnAdminSave" data-i18n="save"></button>
+      </div>
+    </div>
+  </div>
+
   <!-- Customer detail modal（顧客情報・来店履歴） -->
   <div class="modal-backdrop hidden" id="custModal">
     <div class="modal">
@@ -525,22 +539,10 @@
     </div>
   </div>
 
-  <!-- 端末ロック（PIN） -->
-  <div class="lock-screen hidden" id="lockScreen">
-    <div class="lock-box">
-      <div class="lock-logo">🔒</div>
-      <h2 data-i18n="lockTitle"></h2>
-      <p class="lock-sub" data-i18n="lockSub"></p>
-      <input type="password" id="lockPin" inputmode="numeric" autocomplete="off" maxlength="8" data-i18n-placeholder="lockPinPlaceholder">
-      <button class="btn primary full" id="btnUnlock" data-i18n="lockUnlock"></button>
-      <div class="lock-msg" id="lockMsg"></div>
-    </div>
-  </div>
-
   <script src="vendor/supabase.js"></script>
   <script src="config.js?v=1"></script>
-  <script src="store.js?v=1"></script>
-  <script src="i18n.js?v=35"></script>
-  <script src="app.js?v=36"></script>
+  <script src="store.js?v=2"></script>
+  <script src="i18n.js?v=36"></script>
+  <script src="app.js?v=37"></script>
 </body>
 </html>

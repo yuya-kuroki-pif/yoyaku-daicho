@@ -55,6 +55,10 @@ const Cloud = (() => {
     const { error } = await client.from('reservations').delete().in('id', ids);
     if (error) fail(error);
   }
+  async function renameStore(storeId, name) {
+    const { error } = await client.from('stores').update({ name }).eq('id', storeId);
+    if (error) fail(error);
+  }
   async function deleteStore(storeId) {
     const { error } = await client.from('stores').delete().eq('id', storeId);
     if (error) fail(error);
@@ -104,6 +108,6 @@ const Cloud = (() => {
     return !!data;
   }
 
-  return { enabled, init, listStores, loadStore, saveDoc, upsertReservations, deleteReservations, deleteStore, subscribe,
+  return { enabled, init, listStores, loadStore, saveDoc, upsertReservations, deleteReservations, deleteStore, renameStore, subscribe,
     session, signIn, signOut, onAuth, bookingStore, bookingOccupancy, bookingCreate, bookingLookup, bookingCancel };
 })();

@@ -244,12 +244,12 @@ function hoursText(st) {
   return `${fmtTime(s.openMin || 0)}〜${fmtTime(s.closeMin || 0)}`;
 }
 function totalSeats(st) { return (st.tables || []).reduce((a, tb) => a + (tb.seats || 0), 0); }
-function storePhotos(st) {
-  return String(settings(st).storePhotos || '').split(/\r?\n/).map(safeUrl).filter(Boolean);
-}
+function storePhotos() { return []; }   // 写真URL欄は廃止（写真は Google マップから）
+function reviewsEnabled(st) { return settings(st).showReviews !== false; }
+function googlePhotosEnabled(st) { return settings(st).showGooglePhotos !== false; }
 function allPhotos(st) {
   const own = storePhotos(st).map((u) => ({ url: u, g: false }));
-  const g = google.status === 'ok' && google.data ? google.data.photos.map((p) => ({ ...p, g: true })) : [];
+  const g = google.status === 'ok' && google.data && googlePhotosEnabled(st) ? google.data.photos.map((p) => ({ ...p, g: true })) : [];
   return [...own, ...g];
 }
 /* Google 写真の帰属表示（投稿者名・プロフィールへのリンク） */
@@ -388,7 +388,9 @@ function render() {
     const k = b.dataset.tab;
     b.innerHTML = esc(tabLabels[k]) + (counts[k] ? `<span class="cnt">${counts[k]}</span>` : '');
     b.classList.toggle('active', view === 'store' && k === tab);
+    if (k === 'review') b.hidden = !!st && !reviewsEnabled(st);
   });
+  if (st && tab === 'review' && !reviewsEnabled(st)) tab = 'top';
   document.getElementById('foot').textContent = t('powered') + (google.status === 'ok' ? '　·　' + t('poweredGoogle') : '');
   renderHeader(st);
   renderCta(st);
@@ -420,7 +422,7 @@ function renderHeader(st) {
   document.getElementById('hKana').textContent = s.storeKana || '';
 
   const r = document.getElementById('hRating');
-  if (google.status === 'ok' && google.data && google.data.rating != null) {
+  if (google.status === 'ok' && google.data && google.data.rating != null && reviewsEnabled(st)) {
     r.innerHTML = `<span class="score">${google.data.rating.toFixed(1)}</span>${starsHtml(google.data.rating)}` +
       `<a href="${esc(googleMapsLink(st))}" target="_blank" rel="noopener"><span class="rc">${esc(t('tabReview'))}</span> ${esc(tr().reviewsCount(google.data.count))}</a>`;
   } else if (google.status === 'loading') {
@@ -488,7 +490,7 @@ function basicInfoCardHtml(st) {
 }
 
 function ratingCardHtml(st) {
-  if (google.status === 'none') return '';
+  if (google.status === 'none' || !reviewsEnabled(st)) return '';
   if (google.status === 'loading') return `<div class="skeleton" style="width:40%"></div><div class="skeleton" style="width:70%"></div>`;
   if (google.status === 'error') return `<p class="hint">${esc(t('reviewError'))}</p>`;
   const d = google.data || {};
@@ -515,6 +517,7 @@ function reviewHtml(rv, clip) {
 }
 
 function reviewsBlockHtml(st, limit) {
+  if (!reviewsEnabled(st)) return '';
   if (google.status === 'none') return `<div class="review-note">${esc(t('reviewNoteSetup'))}` +
     (googleMapsLink(st) ? `<br><a href="${esc(googleMapsLink(st))}" target="_blank" rel="noopener">${esc(t('viewOnGoogle'))} ›</a></div>` : '</div>');
   if (google.status === 'loading') return `<div class="skeleton" style="width:60%"></div><div class="skeleton"></div><div class="skeleton" style="width:80%"></div>`;
@@ -546,11 +549,13 @@ function infoTableHtml(st) {
     [t('seats'), esc(tr().seatsUnit(totalSeats(st)))],
   ];
   const labels = tr().extraLabels;
-  EXTRA_KEYS.forEach((k) => {
-    if (!s[k]) return;
-    const v = (k === 'storeWebsite' || k === 'storeSns') ? link(s[k]) : esc(s[k]);
-    rows.push([labels[k] || k, v]);
+  const extras = [...(((st && st.settings) || {}).storeExtras || [])];
+  const inf = (google.status === 'ok' && google.data && google.data.info) || {};
+  ['storeWebsite', 'storeParking', 'storeKids'].forEach((k) => {
+    const label = (labels[k] || k).replace(/（URL）$/, '');
+    if (inf[k] && !extras.some((x) => x.label === label)) extras.push({ label, value: inf[k] });
   });
+  extras.forEach((x) => { if (x && x.label && x.value) rows.push([x.label, /^https?:\/\//i.test(x.value) ? link(x.value) : esc(x.value)]); });
   return `<table class="info-table">${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join('')}</table>`;
 }
 
@@ -587,10 +592,12 @@ function renderTop(el, st) {
     html += `<div class="card"><h2>${esc(t('tabMenu'))}</h2>` + courses.slice(0, 3).map((c) => courseItemHtml(c)).join('') +
       (courses.length > 3 ? `<button type="button" class="more-btn" data-go="menu">${esc(t('moreMenu'))} ›</button>` : '') + `</div>`;
   }
-  html += `<div class="card"><h2>${esc(t('reviewHead'))}` +
-    (google.status === 'ok' && google.data ? `<span class="sub">${esc(tr().reviewsCount(google.data.count || 0))}</span>` : '') + `</h2>` +
-    ratingCardHtml(st) + reviewsBlockHtml(st, 3) +
-    (google.status === 'ok' ? `<button type="button" class="more-btn" data-go="review">${esc(t('moreReviews'))} ›</button>` : '') + `</div>`;
+  if (reviewsEnabled(st)) {
+    html += `<div class="card"><h2>${esc(t('reviewHead'))}` +
+      (google.status === 'ok' && google.data ? `<span class="sub">${esc(tr().reviewsCount(google.data.count || 0))}</span>` : '') + `</h2>` +
+      ratingCardHtml(st) + reviewsBlockHtml(st, 3) +
+      (google.status === 'ok' ? `<button type="button" class="more-btn" data-go="review">${esc(t('moreReviews'))} ›</button>` : '') + `</div>`;
+  }
   if (photos.length) {
     html += `<div class="card"><h2>${esc(t('photoHead'))}<span class="sub">${esc(tr().photoCount(photos.length))}</span></h2>` +
       `<div class="photo-grid">${photos.slice(0, 6).map((p, i) => `<div class="${p.g ? 'g' : ''}"><img src="${esc(p.url)}" data-photo="${i}" alt="" loading="lazy">` +

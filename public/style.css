@@ -794,3 +794,16 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
 .cloud-status.info { background: var(--blue-soft); color: var(--blue); }
 .cloud-status.ok { display: none; }
 .auth-box input { letter-spacing: 0; font-size: 16px; text-align: left; }
+
+/* 管理者設定: 店舗一覧 */
+.store-row { display: grid; grid-template-columns: 1fr auto 40px; gap: 8px; align-items: center; margin-bottom: 8px; }
+.store-row input { border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; font-size: 16px; min-height: 46px; min-width: 0; }
+.store-row.current input { border-color: var(--blue); }
+.badge-cur { font-size: 12px; font-weight: 700; color: var(--blue); background: var(--blue-soft); border-radius: 999px; padding: 6px 12px; }
+.store-row .icon-btn { color: var(--red); }
+.store-row .icon-btn:disabled { color: #c2cbd1; }
+/* 店舗詳細（自由項目） */
+.extra-row { display: grid; grid-template-columns: 1fr 2fr 40px; gap: 8px; margin-bottom: 8px; }
+.extra-row input { border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; font-size: 15px; min-height: 44px; min-width: 0; }
+.extra-row .icon-btn { color: var(--red); }
+@media (max-width: 700px) { .extra-row { grid-template-columns: 1fr 1fr 36px; } }

@@ -53,7 +53,7 @@ let closedDatesWork = [];                     // 設定モーダル内の臨時�
 const STORE_EXTRA_KEYS = ['storePrivateRoom', 'storeCharter', 'storeSmoking', 'storeParking', 'storeFacilities', 'storeDrink', 'storeFood',
   'storeScene', 'storeService', 'storeKids', 'storeWebsite', 'storeSns', 'storeOpenDate', 'storeRemarks'];
 const STORE_TEXT_KEYS = ['storeKana', 'storeGenre', 'storeAccess', 'storeHours', 'storeBudget', 'storeBudgetLunch', 'storePayment', 'storeCatch',
-  'storeDescription', 'storePhotos', 'googlePlaceId', 'googleApiKey', 'claudeApiKey', ...STORE_EXTRA_KEYS];
+  'storeDescription'];
 const settingInputId = (k) => 's' + k.charAt(0).toUpperCase() + k.slice(1);
 
 /* ---------- helpers ---------- */
@@ -189,6 +189,8 @@ async function deleteStore() {
   if (registry.stores.length <= 1) { alert(t('lastStoreWarn')); return; }
   const cur = currentStore();
   if (!confirm(t('deleteStoreConfirm').replace('{name}', cur.name))) return;
+  await deleteStoreById(cur.id);
+  return;
   if (cloudMode) {
     try { await Cloud.deleteStore(cur.id); } catch (e) { alert(`${t('cloudSaveError')} ${e.message || ''}`); return; }
     localStorage.removeItem(secretsKey(cur.id));
@@ -249,6 +251,15 @@ function migrateState() {
   if (!state.tags) { state.tags = defaultTags(); changed = true; }
   if (!state.settings.closedDays) { state.settings.closedDays = []; changed = true; }
   if (!state.settings.closedDates) { state.settings.closedDates = []; changed = true; }
+  // 店舗詳細: 固定項目 → 自由項目（項目名＋内容）へ移行。写真URL欄は廃止
+  if (!Array.isArray(state.settings.storeExtras)) {
+    const labels = I18N.ja.storeExtraLabels || {};
+    state.settings.storeExtras = STORE_EXTRA_KEYS.filter((k) => state.settings[k]).map((k) => ({ label: (labels[k] || k).replace(/（URL）$/, ''), value: state.settings[k] }));
+    STORE_EXTRA_KEYS.forEach((k) => { delete state.settings[k]; });
+    changed = true;
+  }
+  if (state.settings.storePhotos !== undefined) { delete state.settings.storePhotos; changed = true; }
+  if (state.settings.claudeApiKeyEnc) { delete state.settings.claudeApiKeyEnc; changed = true; }
   // Google 連携の初期値（未設定のときだけ。意図的に空にした設定は保持）
   if (state.settings.googlePlaceId === undefined && !state.settings.storeName) {
     Object.assign(state.settings, DEFAULT_STORE_INFO);
@@ -1848,17 +1859,10 @@ function openSettingsModal() {
   document.getElementById('sStorePhone').value = state.settings.storePhone || '';
   document.getElementById('sStoreAddress').value = state.settings.storeAddress || '';
   document.getElementById('sStoreNote').value = state.settings.storeNote || '';
-  // 店舗詳細（任意項目）の入力欄を生成してから値を反映
-  document.getElementById('storeExtraFields').innerHTML = STORE_EXTRA_KEYS.map((k) =>
-    `<div class="field"><label>${esc(t('storeExtraLabels')[k] || k)}</label><input type="text" id="${settingInputId(k)}"></div>`).join('');
   STORE_TEXT_KEYS.forEach((k) => { document.getElementById(settingInputId(k)).value = state.settings[k] || ''; });
-  document.getElementById('sClaudeApiKey').value = getClaudeKey();
-  document.getElementById('sClaudeApiKey').type = 'password';
-  document.getElementById('sClaudeShow').checked = false;
-  document.getElementById('sGoogleApiKey').type = 'password';
-  document.getElementById('sGoogleShow').checked = false;
-  document.getElementById('sAiDailyLimit').value = state.settings.aiDailyLimit || 50;
-  renderLockSettings();
+  // 店舗詳細（自由項目）
+  extraWork = (state.settings.storeExtras || []).map((x) => ({ label: x.label || '', value: x.value || '' }));
+  renderExtraRows();
 
   document.getElementById('settingsModal').classList.remove('hidden');
 }
@@ -1954,17 +1958,7 @@ async function saveSettings() {
   state.settings.storeAddress = document.getElementById('sStoreAddress').value.trim();
   state.settings.storeNote = document.getElementById('sStoreNote').value.trim();
   STORE_TEXT_KEYS.forEach((k) => { state.settings[k] = document.getElementById(settingInputId(k)).value.trim(); });
-  state.settings.aiDailyLimit = Math.max(1, Math.min(1000, Number(document.getElementById('sAiDailyLimit').value) || 50));
-  // Claude API キー: ロック有効時は暗号化して保存し、平文は残さない
-  if (lockEnabled() && lockState.cryptoKey) {
-    const plain = state.settings.claudeApiKey;
-    sessionKeys.claude = plain;
-    state.settings.claudeApiKeyEnc = plain ? await encryptStr(lockState.cryptoKey, plain) : '';
-    state.settings.claudeApiKey = '';
-  } else {
-    state.settings.claudeApiKeyEnc = '';
-    sessionKeys.claude = state.settings.claudeApiKey;
-  }
+  state.settings.storeExtras = extraWork.filter((x) => x.label.trim() && x.value.trim()).map((x) => ({ label: lim(x.label.trim(), 40), value: lim(x.value.trim(), 300) }));
   // コース・タグのマスタ（空名は除外）
   state.courses = courseWork.filter((c) => c.name.trim()).map((c) => ({ id: c.id, name: c.name.trim(), price: (c.price || '').trim(), desc: (c.desc || '').trim() }));
   state.tags = tagWork.filter((c) => c.name.trim()).map((c) => ({ id: c.id, name: c.name.trim() }));
@@ -2141,7 +2135,7 @@ async function doSignIn() {
   }
 }
 async function doSignOut() {
-  document.getElementById('settingsModal').classList.add('hidden');
+  document.getElementById('adminModal').classList.add('hidden');
   await Cloud.signOut();
   cloudSync.ready = false;
   if (cloudSync.unsubscribe) { try { cloudSync.unsubscribe(); } catch (e) { /* ignore */ } cloudSync.unsubscribe = null; }
@@ -2151,165 +2145,456 @@ async function doSignOut() {
   showAuth(true);
 }
 
-/* ---------- 端末ロック（PIN）と API キーの保護 ----------
- * PIN は塩付き SHA-256 で店舗共通の registry に保存。Claude API キーは PIN から PBKDF2 で導出した鍵（AES-GCM）で
- * 暗号化して保存し、ロック解除中だけメモリ上で保持する。（Google のキーは予約サイト側でも必要なため平文のまま。
- * 参照元ドメインと API の制限で保護する） */
-const lockState = { locked: false, cryptoKey: null, fails: 0, lockedUntil: 0, lastActivity: Date.now() };
-const sessionKeys = { claude: '' };
-const textEnc = new TextEncoder();
-const textDec = new TextDecoder();
-function b64(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))); }
-function unb64(s) { return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)); }
-async function sha256Hex(str) {
-  const h = await crypto.subtle.digest('SHA-256', textEnc.encode(str));
-  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-async function deriveKey(pin, saltB64) {
-  const km = await crypto.subtle.importKey('raw', textEnc.encode(pin), 'PBKDF2', false, ['deriveKey']);
-  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: unb64(saltB64), iterations: 150000, hash: 'SHA-256' }, km,
-    { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
-}
-async function encryptStr(key, str) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, textEnc.encode(str));
-  return `${b64(iv)}.${b64(ct)}`;
-}
-async function decryptStr(key, packed) {
-  const [ivs, cts] = String(packed).split('.');
-  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(ivs) }, key, unb64(cts));
-  return textDec.decode(pt);
-}
-function lockConfig() { return (registry && registry.lock) || null; }
-function lockEnabled() { return !!lockConfig(); }
-/* 使用する Claude API キー（暗号化保存時はロック解除中のメモリ上の値） */
-function getClaudeKey() { return (sessionKeys.claude || state.settings.claudeApiKey || '').trim(); }
+/* ---------- 管理者設定（店舗の管理・画像読み取り・Googleマップ連携） ---------- */
+let adminStoresWork = [];
+function getClaudeKey() { return (state.settings.claudeApiKey || '').trim(); }
+async function loadSessionKeys() { /* PIN ロック廃止に伴い不要（互換のため残す） */ }
 
-/* 全店舗の Claude キーを（旧鍵で復号 →）新鍵で暗号化、または平文に戻す */
-async function reencryptKeysAllStores(oldKey, newKey) {
+function openAdminModal() {
+  adminStoresWork = registry.stores.map((s) => ({ ...s }));
+  renderAdminStores();
+  document.getElementById('sClaudeApiKey').value = getClaudeKey();
+  document.getElementById('sClaudeApiKey').type = 'password';
+  document.getElementById('sClaudeShow').checked = false;
+  document.getElementById('sAiDailyLimit').value = state.settings.aiDailyLimit || 50;
+  document.getElementById('sGooglePlaceId').value = state.settings.googlePlaceId || '';
+  document.getElementById('sGoogleApiKey').value = state.settings.googleApiKey || '';
+  document.getElementById('sGoogleApiKey').type = 'password';
+  document.getElementById('sGoogleShow').checked = false;
+  document.getElementById('sGoogleQuery').value = '';
+  document.getElementById('googleCandidates').classList.add('hidden');
+  document.getElementById('sShowReviews').checked = state.settings.showReviews !== false;
+  document.getElementById('sShowGooglePhotos').checked = state.settings.showGooglePhotos !== false;
+  document.getElementById('adminModal').classList.remove('hidden');
+}
+function closeAdminModal() { document.getElementById('adminModal').classList.add('hidden'); }
+function renderAdminStores() {
+  const wrap = document.getElementById('adminStores');
+  wrap.innerHTML = '';
+  adminStoresWork.forEach((s) => {
+    const row = document.createElement('div');
+    row.className = 'store-row' + (s.id === registry.currentId ? ' current' : '');
+    row.innerHTML =
+      `<input type="text" class="sr-name" value="${esc(s.name)}" maxlength="60">` +
+      (s.id === registry.currentId
+        ? `<span class="badge-cur">${esc(t('currentBadge'))}</span>`
+        : `<button type="button" class="btn ghost small sr-switch">${esc(t('switchBtn'))}</button>`) +
+      `<button type="button" class="icon-btn sr-del" ${adminStoresWork.length <= 1 ? 'disabled' : ''}>🗑</button>`;
+    row.querySelector('.sr-name').addEventListener('input', (e) => { s.name = e.target.value; });
+    const sw = row.querySelector('.sr-switch');
+    if (sw) sw.addEventListener('click', async () => { await saveAdmin(false); await switchStore(s.id); openAdminModal(); });
+    row.querySelector('.sr-del').addEventListener('click', async () => {
+      if (adminStoresWork.length <= 1) { alert(t('lastStoreWarn')); return; }
+      if (!confirm(t('deleteStoreConfirm').replace('{name}', s.name))) return;
+      await deleteStoreById(s.id);
+      openAdminModal();
+    });
+    wrap.appendChild(row);
+  });
+}
+/* 店舗名の保存（表示中の店舗は予約サイトの店名も同期）と、画像読み取り・Google 連携の設定 */
+async function saveAdmin(close = true) {
+  const renames = [];
+  adminStoresWork.forEach((w) => {
+    const s = registry.stores.find((x) => x.id === w.id);
+    const name = lim(w.name.trim(), 60);
+    if (s && name && s.name !== name) { s.name = name; renames.push(s); }
+  });
+  saveRegistry();
+  const cur = currentStore();
+  if (cur && cur.name) state.settings.storeName = cur.name;
   if (cloudMode) {
-    for (const s of registry.stores) {
-      const sec = secretsGet(s.id);
-      let plain = sec.claudeApiKey || '';
-      if (sec.claudeApiKeyEnc && oldKey) { try { plain = await decryptStr(oldKey, sec.claudeApiKeyEnc); } catch (e) { plain = ''; } }
-      secretsSet(s.id, newKey ? { claudeApiKey: '', claudeApiKeyEnc: plain ? await encryptStr(newKey, plain) : '' } : { claudeApiKey: plain, claudeApiKeyEnc: '' });
-    }
-    Object.assign(state.settings, secretsGet(registry.currentId));
-    await loadSessionKeys();
-    return;
+    for (const s of renames) { if (s.id !== registry.currentId) { try { await Cloud.renameStore(s.id, s.name); } catch (e) { /* 次回保存時に反映 */ } } }
   }
-  for (const s of registry.stores) {
-    const raw = localStorage.getItem(dataKey(s.id));
-    if (!raw) continue;
-    let data;
-    try { data = JSON.parse(raw); } catch (e) { continue; }
-    const st = data.settings || (data.settings = {});
-    let plain = st.claudeApiKey || '';
-    if (st.claudeApiKeyEnc && oldKey) { try { plain = await decryptStr(oldKey, st.claudeApiKeyEnc); } catch (e) { plain = ''; } }
-    if (newKey) { st.claudeApiKeyEnc = plain ? await encryptStr(newKey, plain) : ''; st.claudeApiKey = ''; }
-    else { st.claudeApiKey = plain; st.claudeApiKeyEnc = ''; }
-    localStorage.setItem(dataKey(s.id), JSON.stringify(data));
-  }
-  load();
-  await loadSessionKeys();
-}
-async function loadSessionKeys() {
-  sessionKeys.claude = '';
-  if (state.settings.claudeApiKeyEnc && lockState.cryptoKey) {
-    try { sessionKeys.claude = await decryptStr(lockState.cryptoKey, state.settings.claudeApiKeyEnc); } catch (e) { sessionKeys.claude = ''; }
-  }
-}
-async function setPin(pin, minutes) {
-  const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
-  const hash = await sha256Hex(`${salt}:${pin}`);
-  const newKey = await deriveKey(pin, salt);
-  const oldKey = lockState.cryptoKey;
-  registry.lock = { salt, hash, minutes: Number(minutes) || 0 };
-  saveRegistry();
-  lockState.cryptoKey = newKey;
-  await reencryptKeysAllStores(oldKey, newKey);
-}
-async function clearPin() {
-  const oldKey = lockState.cryptoKey;
-  registry.lock = null;
-  saveRegistry();
-  lockState.cryptoKey = null;
-  await reencryptKeysAllStores(oldKey, null);
-}
-function lockApp() {
-  if (!lockEnabled() || lockState.locked) return;
-  lockState.locked = true;
-  sessionKeys.claude = '';
-  lockState.cryptoKey = null;
-  closeCellPopover();
-  document.getElementById('lockScreen').classList.remove('hidden');
-  document.getElementById('lockMsg').textContent = '';
-  const inp = document.getElementById('lockPin');
-  inp.value = '';
-  setTimeout(() => inp.focus(), 50);
-}
-async function tryUnlock() {
-  const inp = document.getElementById('lockPin');
-  const msg = document.getElementById('lockMsg');
-  const now = Date.now();
-  if (now < lockState.lockedUntil) { msg.textContent = t('lockWait').replace('{sec}', Math.ceil((lockState.lockedUntil - now) / 1000)); return; }
-  const pin = inp.value.trim();
-  const c = lockConfig();
-  if (!c || !pin) return;
-  if ((await sha256Hex(`${c.salt}:${pin}`)) !== c.hash) {
-    lockState.fails += 1;
-    inp.value = '';
-    if (lockState.fails >= 5) {
-      // 5回以上の失敗で待ち時間（30秒 × 超過回数、最大4分）
-      lockState.lockedUntil = now + 30000 * Math.min(8, lockState.fails - 4);
-      msg.textContent = t('lockWait').replace('{sec}', Math.ceil((lockState.lockedUntil - now) / 1000));
-    } else {
-      msg.textContent = t('lockWrong');
-    }
-    return;
-  }
-  lockState.fails = 0;
-  lockState.cryptoKey = await deriveKey(pin, c.salt);
-  await loadSessionKeys();
-  lockState.locked = false;
-  lockState.lastActivity = Date.now();
-  document.getElementById('lockScreen').classList.add('hidden');
-  inp.value = '';
+  state.settings.claudeApiKey = document.getElementById('sClaudeApiKey').value.trim();
+  state.settings.aiDailyLimit = Math.max(1, Math.min(1000, Number(document.getElementById('sAiDailyLimit').value) || 50));
+  state.settings.googlePlaceId = document.getElementById('sGooglePlaceId').value.trim();
+  state.settings.googleApiKey = document.getElementById('sGoogleApiKey').value.trim();
+  state.settings.showReviews = document.getElementById('sShowReviews').checked;
+  state.settings.showGooglePhotos = document.getElementById('sShowGooglePhotos').checked;
+  save();
+  if (close) closeAdminModal();
   renderAll();
 }
-function touchActivity() { lockState.lastActivity = Date.now(); }
-function checkAutoLock() {
-  const c = lockConfig();
-  if (!c || lockState.locked || !c.minutes) return;
-  if (Date.now() - lockState.lastActivity > c.minutes * 60000) lockApp();
+async function deleteStoreById(id) {
+  if (registry.stores.length <= 1) { alert(t('lastStoreWarn')); return; }
+  const target = registry.stores.find((s) => s.id === id);
+  if (!target) return;
+  if (cloudMode) {
+    try { await Cloud.deleteStore(id); } catch (e) { alert(`${t('cloudSaveError')} ${e.message || ''}`); return; }
+    localStorage.removeItem(secretsKey(id));
+  }
+  localStorage.removeItem(dataKey(id));
+  registry.stores = registry.stores.filter((s) => s.id !== id);
+  if (registry.currentId === id) {
+    registry.currentId = registry.stores[0].id;
+    saveRegistry();
+    await loadState();
+  } else {
+    saveRegistry();
+  }
+  renderAll();
 }
-/* 設定画面: ロック設定 */
-function renderLockSettings() {
-  const c = lockConfig();
-  document.getElementById('lockStatus').textContent = c
-    ? t('lockOn').replace('{min}', c.minutes ? `${c.minutes}${t('minutesUnit')}` : t('lockNever'))
-    : t('lockOff');
-  document.getElementById('btnLockClear').classList.toggle('hidden', !c);
-  document.getElementById('sLockMinutes').value = c ? String(c.minutes) : '10';
-  document.getElementById('sLockPin').value = '';
-  document.getElementById('sLockPin2').value = '';
+
+/* ---------- 店舗詳細（任意項目）の編集: 項目名＋内容を自由に追加・削除 ---------- */
+let extraWork = [];
+function renderExtraRows() {
+  const wrap = document.getElementById('storeExtraRows');
+  wrap.innerHTML = '';
+  extraWork.forEach((x, i) => {
+    const row = document.createElement('div');
+    row.className = 'extra-row';
+    row.innerHTML =
+      `<input type="text" class="ex-label" value="${esc(x.label)}" placeholder="${esc(t('extraLabelPh'))}" maxlength="40">` +
+      `<input type="text" class="ex-value" value="${esc(x.value)}" placeholder="${esc(t('extraValuePh'))}" maxlength="300">` +
+      `<button type="button" class="icon-btn">🗑</button>`;
+    row.querySelector('.ex-label').addEventListener('input', (e) => { x.label = e.target.value; });
+    row.querySelector('.ex-value').addEventListener('input', (e) => { x.value = e.target.value; });
+    row.querySelector('.icon-btn').addEventListener('click', () => { extraWork.splice(i, 1); renderExtraRows(); });
+    wrap.appendChild(row);
+  });
 }
-async function saveLockSettings() {
-  const pin = document.getElementById('sLockPin').value.trim();
-  const pin2 = document.getElementById('sLockPin2').value.trim();
-  const minutes = Number(document.getElementById('sLockMinutes').value) || 0;
-  const c = lockConfig();
-  if (!pin && c) { c.minutes = minutes; saveRegistry(); renderLockSettings(); alert(t('lockUpdated')); return; }
-  if (!/^\d{4,8}$/.test(pin)) { alert(t('lockPinFormat')); return; }
-  if (pin !== pin2) { alert(t('lockPinMismatch')); return; }
-  await setPin(pin, minutes);
-  renderLockSettings();
-  alert(t('lockSet'));
+/* 店舗詳細の項目を設定（同じ項目名があれば上書き）。value が空なら削除 */
+function setExtra(label, value) {
+  const list = state.settings.storeExtras || (state.settings.storeExtras = []);
+  const key = String(label || '').trim();
+  if (!key) return false;
+  const idx = list.findIndex((x) => x.label === key);
+  if (!String(value || '').trim()) { if (idx >= 0) list.splice(idx, 1); return idx >= 0; }
+  if (idx >= 0) list[idx].value = String(value).trim(); else list.push({ label: key, value: String(value).trim() });
+  return true;
 }
-async function removeLock() {
-  if (!confirm(t('lockClearConfirm'))) return;
-  await clearPin();
-  renderLockSettings();
+
+/* ---------- Google マップから店舗情報を取り込む（設定へ直接反映。空欄のみ） ---------- */
+async function fetchGoogleInfo(pid, key) {
+  const fields = GOOGLE_PLACE_FIELDS.split(',').filter((f) => f !== 'reviews' && f !== 'photos').join(',');
+  const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(pid)}?languageCode=${encodeURIComponent(state.settings.lang || 'ja')}`, {
+    headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': fields },
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (err) { /* ignore */ }
+    throw new Error(msg);
+  }
+  return googlePlaceToInfo(await res.json(), state.settings.lang);
+}
+/* 取得した情報を設定へ反映（空欄のみ。website/parking/kids は店舗詳細の項目に）。反映した項目数を返す */
+function applyGoogleInfo(info) {
+  const labels = t('storeExtraLabels');
+  let n = 0;
+  Object.entries(info).forEach(([k, v]) => {
+    if (!v) return;
+    if (STORE_EXTRA_KEYS.includes(k)) {
+      const label = (labels[k] || k).replace(/（URL）$/, '');
+      if (!(state.settings.storeExtras || []).some((x) => x.label === label)) { setExtra(label, v); n += 1; }
+    } else if (!String(state.settings[k] || '').trim()) {
+      state.settings[k] = v;
+      n += 1;
+    }
+  });
+  if (state.settings.storeName) { const cs = currentStore(); if (cs && cs.name !== state.settings.storeName) { cs.name = state.settings.storeName; saveRegistry(); } }
+  return n;
+}
+async function importStoreInfoFromGoogle(pid, key) {
+  pid = (pid || state.settings.googlePlaceId || '').trim();
+  key = (key || state.settings.googleApiKey || '').trim();
+  if (!pid || !key) throw new Error(t('googleImportNeed'));
+  const info = await fetchGoogleInfo(pid, key);
+  const n = applyGoogleInfo(info);
+  save();
+  renderAll();
+  return n;
+}
+async function importFromAdminInputs() {
+  const btn = document.getElementById('btnGoogleImport');
+  btn.disabled = true;
+  try {
+    const pid = document.getElementById('sGooglePlaceId').value.trim();
+    const key = document.getElementById('sGoogleApiKey').value.trim();
+    if (!pid || !key) { alert(t('googleImportNeed')); return; }
+    state.settings.googlePlaceId = pid;
+    state.settings.googleApiKey = key;
+    const n = await importStoreInfoFromGoogle(pid, key);
+    alert(n ? t('googleImportDone').replace('{n}', n) : t('googleImportNone'));
+  } catch (e) {
+    alert(`${t('googleImportError')} ${e.message || ''}`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+/* Google マップの店舗検索（Text Search）。候補の配列を返す */
+async function searchGooglePlaces(query, key) {
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress' },
+    body: JSON.stringify({ textQuery: query, languageCode: state.settings.lang || 'ja', maxResultCount: 5 }),
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (err) { /* ignore */ }
+    throw new Error(msg);
+  }
+  return ((await res.json()).places || []).filter((p) => p.id).map((p) => ({ id: p.id, name: p.displayName ? p.displayName.text : p.id, address: p.formattedAddress || '' }));
+}
+function parseGoogleQuery(q) {
+  const s = String(q || '').trim();
+  const pid = s.match(/place_id[:=]([A-Za-z0-9_-]{10,})/) || s.match(/\b(ChIJ[A-Za-z0-9_-]{10,})\b/);
+  if (pid) return { placeId: pid[1] };
+  const m = s.match(/\/maps\/place\/([^/?#]+)/) || s.match(/[?&]q(?:uery)?=([^&#]+)/);
+  if (m) { try { return { text: decodeURIComponent(m[1].replace(/\+/g, ' ')) }; } catch (e) { return { text: m[1] }; } }
+  return { text: s };
+}
+async function findPlaceFromGoogle() {
+  const key = document.getElementById('sGoogleApiKey').value.trim();
+  const q = parseGoogleQuery(document.getElementById('sGoogleQuery').value);
+  const list = document.getElementById('googleCandidates');
+  if (!key) { alert(t('googleFindNeedKey')); return; }
+  const pick = async (pid) => {
+    document.getElementById('sGooglePlaceId').value = pid;
+    list.classList.add('hidden');
+    state.settings.googlePlaceId = pid;
+    state.settings.googleApiKey = key;
+    try {
+      const n = await importStoreInfoFromGoogle(pid, key);
+      alert(n ? t('googleImportDone').replace('{n}', n) : t('googleImportNone'));
+    } catch (e) { alert(`${t('googleImportError')} ${e.message || ''}`); }
+  };
+  if (q.placeId) { await pick(q.placeId); return; }
+  if (!q.text) { alert(t('googleFindNeedQuery')); return; }
+  const btn = document.getElementById('btnGoogleFind');
+  btn.disabled = true;
+  try {
+    const places = await searchGooglePlaces(q.text, key);
+    if (!places.length) { alert(t('googleFindNone')); return; }
+    list.innerHTML = `<div class="cand-note">${esc(t('googleFindPick'))}</div>` + places.map((p) =>
+      `<button type="button" class="cand" data-pid="${esc(p.id)}"><b>${esc(p.name)}</b><span>${esc(p.address)}</span></button>`).join('');
+    list.classList.remove('hidden');
+    list.querySelectorAll('.cand').forEach((b) => b.addEventListener('click', () => pick(b.dataset.pid)));
+  } catch (e) {
+    alert(`${t('googleImportError')} ${e.message || ''}`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ---------- チャット: テーブル設定・予約サイト最適化の指示 ----------
+ * ルールベースで解釈できない指示は、Claude API キーがあれば Claude に「操作（アクション）の列」へ変換させて実行する。 */
+const CHAT_FIELD_ALIASES = [
+  ['店名のよみ', 'storeKana'], ['よみ', 'storeKana'], ['店名', 'storeName'], ['ジャンル', 'storeGenre'], ['電話番号', 'storePhone'], ['電話', 'storePhone'],
+  ['住所', 'storeAddress'], ['アクセス', 'storeAccess'], ['最寄り', 'storeAccess'], ['営業時間の表示', 'storeHours'], ['営業時間', 'storeHours'],
+  ['昼の予算', 'storeBudgetLunch'], ['予算（昼）', 'storeBudgetLunch'], ['予算(昼)', 'storeBudgetLunch'], ['予算', 'storeBudget'],
+  ['支払い方法', 'storePayment'], ['支払い', 'storePayment'], ['キャッチコピー', 'storeCatch'], ['紹介文', 'storeDescription'], ['お店の紹介', 'storeDescription'],
+  ['注意事項', 'storeNote'], ['Place ID', 'googlePlaceId'], ['place id', 'googlePlaceId'],
+];
+const CHAT_FIELD_LABELS = { storeKana: '店名のよみ', storeName: '店名', storeGenre: 'ジャンル', storePhone: '電話番号', storeAddress: '住所', storeAccess: 'アクセス', storeHours: '営業時間', storeBudgetLunch: '予算（昼）', storeBudget: '予算（夜）', storePayment: '支払い方法', storeCatch: 'キャッチコピー', storeDescription: '紹介文', storeNote: '注意事項', googlePlaceId: 'Place ID' };
+const WEEKDAY_CHARS = ['日', '月', '火', '水', '木', '金', '土'];
+
+/* 1つの操作を実行して結果文を返す */
+async function applyChatAction(a) {
+  const fmtDone = (label, v) => `✅ ${label}: ${v} — ${t('chatUpdated')}`;
+  switch (a.type) {
+    case 'set_field': {
+      if (!(a.field in CHAT_FIELD_LABELS)) return t('chatUnknown');
+      const v = lim(String(a.value || '').trim(), a.field === 'storeDescription' ? 2000 : 300);
+      state.settings[a.field] = v;
+      if (a.field === 'storeName' && v) { const cs = currentStore(); if (cs) { cs.name = v; saveRegistry(); } }
+      return fmtDone(CHAT_FIELD_LABELS[a.field], v || '（空）');
+    }
+    case 'set_flag': {
+      if (a.flag === 'showReviews') { state.settings.showReviews = !!a.value; return `✅ ${t('showReviewsLabel')}: ${a.value ? 'ON' : 'OFF'} — ${t('chatUpdated')}`; }
+      if (a.flag === 'showGooglePhotos') { state.settings.showGooglePhotos = !!a.value; return `✅ ${t('showGooglePhotosLabel')}: ${a.value ? 'ON' : 'OFF'} — ${t('chatUpdated')}`; }
+      return t('chatUnknown');
+    }
+    case 'import_google': {
+      if (!state.settings.googleApiKey || !state.settings.googlePlaceId) return t('chatNeedGoogle');
+      const n = await importStoreInfoFromGoogle();
+      return n ? `✅ ${t('googleImportDone').replace('{n}', n).replace(/。.*$/, '')}` : t('googleImportNone');
+    }
+    case 'find_place': {
+      if (!state.settings.googleApiKey) return t('chatNeedGoogle');
+      const places = await searchGooglePlaces(a.query, state.settings.googleApiKey);
+      if (!places.length) return t('googleFindNone');
+      state.settings.googlePlaceId = places[0].id;
+      let n = 0;
+      try { n = applyGoogleInfo(await fetchGoogleInfo(places[0].id, state.settings.googleApiKey)); } catch (e) { /* 取り込みは任意 */ }
+      return `✅ Place ID → ${places[0].name}（${places[0].address}）\n${places.length > 1 ? `他の候補: ${places.slice(1).map((p) => p.name).join(' / ')}\n` : ''}${n ? t('googleImportDone').replace('{n}', n).replace(/。.*$/, '') : ''}`.trim();
+    }
+    case 'set_closed_days': {
+      const days = [...new Set((a.days || []).map(Number).filter((d) => d >= 0 && d <= 6))].sort();
+      state.settings.closedDays = days;
+      return fmtDone(t('closedDaysLabel'), days.length ? days.map((d) => WEEKDAY_CHARS[d]).join('・') : t('noClosedShort'));
+    }
+    case 'add_closed_date': {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(a.date || '')) return t('chatNeedDate');
+      state.settings.closedDates = [...new Set([...(state.settings.closedDates || []), a.date])].sort();
+      return fmtDone(t('closedDatesLabel'), fmtYmd(a.date));
+    }
+    case 'remove_closed_date': {
+      state.settings.closedDates = (state.settings.closedDates || []).filter((d) => d !== a.date);
+      return fmtDone(t('closedDatesLabel'), `${fmtYmd(a.date)} ✕`);
+    }
+    case 'set_hours': {
+      const o = Number(a.open), c = Number(a.close);
+      if (!(c > o)) return t('chatNeedTime');
+      state.settings.openMin = o; state.settings.closeMin = c;
+      return `✅ ${fmtTime(o)}〜${fmtTime(c)} — ${t('chatUpdated')}`;
+    }
+    case 'table_add': {
+      const name = lim(String(a.name || '').trim(), 20);
+      if (!name) return t('chatNeedTable');
+      if (state.tables.some((tb) => tb.name === name)) return `${name}: ${t('chatExists')}`;
+      state.tables.push({ id: uid(), name, seats: Math.max(1, Number(a.seats) || 4), min: Math.max(1, Number(a.min) || 1), group: String(a.group || '') });
+      return `✅ ${name} (${Math.max(1, Number(a.seats) || 4)}${t('seatsUnit')}) — ${t('chatDone')}`;
+    }
+    case 'table_update': {
+      const tb = state.tables.find((x) => x.name === a.name);
+      if (!tb) return t('chatNotFoundTable');
+      const parts = [];
+      if (a.seats != null) { tb.seats = Math.max(1, Number(a.seats) || tb.seats); parts.push(`${tb.seats}${t('seatsUnit')}`); }
+      if (a.min != null) { tb.min = Math.min(tb.seats, Math.max(1, Number(a.min) || 1)); parts.push(`${t('minSeatsLabel')} ${tb.min}`); }
+      if (a.group != null) { tb.group = String(a.group); parts.push(`${t('groupLabel')} ${tb.group || '—'}`); }
+      if (a.newName) { tb.name = lim(String(a.newName).trim(), 20); parts.push(`→ ${tb.name}`); }
+      return `✅ ${a.name} ${parts.join(' / ')} — ${t('chatUpdated')}`;
+    }
+    case 'table_delete': {
+      const tb = state.tables.find((x) => x.name === a.name);
+      if (!tb) return t('chatNotFoundTable');
+      state.tables = state.tables.filter((x) => x.id !== tb.id);
+      state.sites.forEach((s) => { s.tableIds = s.tableIds.filter((id) => id !== tb.id); });
+      return `✅ ${tb.name} — ${t('chatDeleted')}`;
+    }
+    case 'site_toggle': {
+      const s = (state.sites || []).find((x) => x.name.toLowerCase().includes(String(a.name || '').toLowerCase()));
+      if (!s) return t('chatNotFoundSite');
+      s.enabled = !!a.enabled;
+      return `✅ ${s.name}: ${a.enabled ? t('acceptOn') : t('acceptOff')} — ${t('chatUpdated')}`;
+    }
+    case 'course_set': {
+      const name = lim(String(a.name || '').trim(), 60);
+      if (!name) return t('chatUnknown');
+      let c = (state.courses || []).find((x) => x.name === name || x.name.includes(name));
+      if (!c) { c = { id: 'crs' + uid(), name, price: '', desc: '' }; state.courses = state.courses || []; state.courses.push(c); }
+      if (a.price != null) c.price = lim(String(a.price), 40);
+      if (a.desc != null) c.desc = lim(String(a.desc), 300);
+      return `✅ ${t('course')} ${c.name}${c.price ? ` ${c.price}` : ''}${c.desc ? `（${c.desc}）` : ''} — ${t('chatUpdated')}`;
+    }
+    case 'course_delete': {
+      const before = (state.courses || []).length;
+      state.courses = (state.courses || []).filter((x) => !(x.name === a.name || x.name.includes(a.name)));
+      return state.courses.length < before ? `✅ ${t('course')} ${a.name} — ${t('chatDeleted')}` : t('chatNotFound');
+    }
+    case 'extra_set': {
+      if (!setExtra(a.label, a.value)) return t('chatUnknown');
+      return fmtDone(a.label, a.value);
+    }
+    case 'extra_delete': {
+      return setExtra(a.label, '') ? `✅ ${a.label} — ${t('chatDeleted')}` : t('chatNotFound');
+    }
+    default:
+      return t('chatUnknown');
+  }
+}
+async function runChatActions(actions) {
+  const out = [];
+  for (const a of actions) out.push(await applyChatAction(a));
+  save();
+  renderAll();
+  return out.join('\n');
+}
+
+/* ルールベースの解釈（テーブル設定・予約サイト最適化） → アクション配列 or null */
+function chatParseSiteCommands(text) {
+  const lower = text.toLowerCase();
+  const val = (s) => String(s || '').replace(/^[「『"]|[」』"]$/g, '').trim();
+  // Google マップから取り込み
+  if (/google\s*マップ|googleマップ|グーグル/i.test(lower) && /(取り込|取込|取得|反映|同期)/.test(text) && !/(検索|探)/.test(text)) return [{ type: 'import_google' }];
+  // Google マップで検索して設定
+  let m = text.match(/google\s*マップで\s*(.+?)\s*(?:を|の)?(?:検索|探)/i);
+  if (m) return [{ type: 'find_place', query: val(m[1]) }];
+  m = text.match(/\b(ChIJ[A-Za-z0-9_-]{10,})\b/);
+  if (m && /place\s*id/i.test(lower)) return [{ type: 'set_field', field: 'googlePlaceId', value: m[1] }];
+  // 口コミ・写真の表示切替
+  if (/(口コミ|評価|レビュー)/.test(text) && /(非表示|隠|消|出さない|オフ|off)/i.test(text)) return [{ type: 'set_flag', flag: 'showReviews', value: false }];
+  if (/(口コミ|評価|レビュー)/.test(text) && /(表示|見せ|出して|オン|on)/i.test(text)) return [{ type: 'set_flag', flag: 'showReviews', value: true }];
+  if (/写真/.test(text) && /(非表示|隠|消|出さない|オフ|off)/i.test(text)) return [{ type: 'set_flag', flag: 'showGooglePhotos', value: false }];
+  if (/写真/.test(text) && /(表示|見せ|出して|オン|on)/i.test(text)) return [{ type: 'set_flag', flag: 'showGooglePhotos', value: true }];
+  // 受付停止・再開
+  m = text.match(/^(.+?)の受付を(停止|止め|再開|開始)/);
+  if (m) return [{ type: 'site_toggle', name: val(m[1]), enabled: /(再開|開始)/.test(m[2]) }];
+  // 定休日
+  if (/定休日/.test(text)) {
+    if (/(なし|無し|無くして|解除)/.test(text)) return [{ type: 'set_closed_days', days: [] }];
+    const days = [];
+    text.replace(/定休日/g, '').split('').forEach((ch) => { const i = WEEKDAY_CHARS.indexOf(ch); if (i >= 0) days.push(i); });
+    if (days.length) return [{ type: 'set_closed_days', days }];
+  }
+  m = text.match(/臨時休業.*?(\d{1,2})月(\d{1,2})日/);
+  if (m) {
+    const y = new Date().getFullYear();
+    const date = `${y}-${pad2(+m[1])}-${pad2(+m[2])}`;
+    return [{ type: /(解除|取り消|取消|削除)/.test(text) ? 'remove_closed_date' : 'add_closed_date', date }];
+  }
+  // 最小人数・テーブル名変更
+  m = text.match(/^(\S+?)の(?:予約)?最小人数を(\d+)/);
+  if (m) return [{ type: 'table_update', name: m[1], min: +m[2] }];
+  m = text.match(/^(\S+?)の(?:テーブル)?名(?:前|称)?を(\S+?)に/);
+  if (m) return [{ type: 'table_update', name: m[1], newName: val(m[2]) }];
+  // コース
+  m = text.match(/コース[「『]?(.+?)[」』]?の(?:料金|価格|値段)を(.+?)(?:に|へ)(?:変更|設定)?/);
+  if (m) return [{ type: 'course_set', name: val(m[1]), price: val(m[2]) }];
+  m = text.match(/コース[「『]?(.+?)[」』]?の(?:説明|内容)を(.+?)(?:に|へ)(?:変更|設定)?$/);
+  if (m) return [{ type: 'course_set', name: val(m[1]), desc: val(m[2]) }];
+  m = text.match(/コース[「『]?(.+?)[」』]?を(?:追加|作成)/);
+  if (m) { const pm = m[1].match(/^(.+?)\s*(\d[\d,]*円)$/); return [pm ? { type: 'course_set', name: val(pm[1]), price: pm[2] } : { type: 'course_set', name: val(m[1]) }]; }
+  m = text.match(/コース[「『]?(.+?)[」』]?を削除/);
+  if (m) return [{ type: 'course_delete', name: val(m[1]) }];
+  // 店舗詳細の項目
+  m = text.match(/店舗詳細(?:に|の)?[「『]?(.+?)[」』]?を削除/);
+  if (m) return [{ type: 'extra_delete', label: val(m[1]) }];
+  m = text.match(/店舗詳細(?:に|の)?[「『]?(.+?)[」』]?[:：は]\s*(.+?)(?:を追加|に設定|を設定|にして)?$/);
+  if (m) return [{ type: 'extra_set', label: val(m[1]), value: val(m[2]) }];
+  // 店舗情報の文言（〇〇を△△に）
+  for (const [alias, field] of CHAT_FIELD_ALIASES) {
+    const re = new RegExp(`^${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:を|は)\\s*(.+?)\\s*(?:に(?:変更|設定|して|してください)?|にして(?:ください)?|で(?:お願い)?)?$`, 'i');
+    const mm = text.match(re);
+    if (mm && !/(予約|席|ブロック|ウォークイン)/.test(alias)) return [{ type: 'set_field', field, value: val(mm[1]) }];
+  }
+  return null;
+}
+
+/* Claude に指示を解釈させる（キー設定時のみ）。応答は {actions:[...], reply:'...'} */
+async function chatAiInterpret(text) {
+  const key = getClaudeKey();
+  if (!key) return null;
+  const tables = state.tables.map((tb) => `${tb.name}(${tb.seats}席${tb.group ? '/' + tb.group : ''})`).join(', ');
+  const sites = (state.sites || []).map((s) => `${s.name}:${s.enabled ? 'ON' : 'OFF'}`).join(', ');
+  const courses = (state.courses || []).map((c) => c.name + (c.price ? ' ' + c.price : '')).join(', ');
+  const extras = (state.settings.storeExtras || []).map((x) => `${x.label}=${x.value}`).join(', ');
+  const system = `あなたは飲食店の予約台帳の設定アシスタントです。ユーザーの日本語（またはベトナム語）の指示を、次のアクションの配列に変換して JSON だけを返してください。\n` +
+    `アクション:\n` +
+    `- {"type":"set_field","field":F,"value":文字列}  F は storeName/storeKana/storeGenre/storePhone/storeAddress/storeAccess/storeHours/storeBudget/storeBudgetLunch/storePayment/storeCatch/storeDescription/storeNote/googlePlaceId\n` +
+    `- {"type":"set_flag","flag":"showReviews"|"showGooglePhotos","value":true|false}  予約サイトでの Google 口コミ／写真の表示\n` +
+    `- {"type":"import_google"}  Google マップから店舗情報を取り込む\n- {"type":"find_place","query":店名など}  Google マップで店舗を検索して設定\n` +
+    `- {"type":"set_closed_days","days":[0-6]}  定休日（0=日曜）\n- {"type":"add_closed_date","date":"YYYY-MM-DD"} / {"type":"remove_closed_date","date":...}  臨時休業\n` +
+    `- {"type":"set_hours","open":分,"close":分}  営業時間（例 17:00 → 1020）\n` +
+    `- {"type":"table_add","name":..,"seats":n,"min":n,"group":..} / {"type":"table_update","name":..,"seats"?:n,"min"?:n,"group"?:..,"newName"?:..} / {"type":"table_delete","name":..}\n` +
+    `- {"type":"site_toggle","name":予約サイト名,"enabled":true|false}\n- {"type":"course_set","name":..,"price"?:..,"desc"?:..} / {"type":"course_delete","name":..}\n` +
+    `- {"type":"extra_set","label":項目名,"value":内容} / {"type":"extra_delete","label":..}  店舗詳細（個室・駐車場など自由項目）\n` +
+    `現在の状態: 店名=${state.settings.storeName || ''} / テーブル: ${tables} / 予約サイト: ${sites} / コース: ${courses} / 店舗詳細: ${extras} / 定休日=${(state.settings.closedDays || []).map((d) => WEEKDAY_CHARS[d]).join('') || 'なし'} / 今日=${todayStr()}\n` +
+    `該当する操作が無い、または予約の登録・変更（お客様の予約）に関する指示なら {"actions":[],"reply":"理由"} を返してください。文言の改善提案を求められたら、改善した文言で set_field を提案してください。出力は {"actions":[...],"reply":"短い日本語の説明"} のみ。`;
+  const res = await fetch(CLAUDE_API_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'server-side-fallback-2026-07-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 1500, fallbacks: 'default', system, output_config: { effort: 'low' }, messages: [{ role: 'user', content: text }] }),
+  });
+  if (!res.ok) { let msg = `HTTP ${res.status}`; try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (err) { /* ignore */ } throw new Error(msg); }
+  const data = await res.json();
+  if (data.stop_reason === 'refusal') throw new Error(t('aiRefused'));
+  const body = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+  const m = body.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error(t('aiNoJson'));
+  const parsed = JSON.parse(m[0]);
+  return { actions: Array.isArray(parsed.actions) ? parsed.actions : [], reply: String(parsed.reply || '') };
 }
 
 /* ---------- バックアップの催促（7日以上未保存なら上部に表示） ---------- */
@@ -2787,7 +3072,7 @@ function chatExecute(text) {
   return t('chatUnknown') + '\n' + t('chatExamples');
 }
 
-function chatSubmit() {
+async function chatSubmit() {
   const input = document.getElementById('chatInput');
   const text = input.value.trim();
   if (!text) return;
@@ -2795,7 +3080,23 @@ function chatSubmit() {
   chatAppend('user', text);
   let reply;
   try {
-    reply = chatExecute(text);
+    const acts = chatParseSiteCommands(text);
+    if (acts) {
+      reply = await runChatActions(acts);
+    } else {
+      reply = chatExecute(text);
+      // 従来のルールで解釈できない設定系の指示は Claude に解釈させる
+      const needsAi = [t('chatUnknown'), t('chatNeedTime'), t('chatNeedName'), t('chatNeedTable'), t('chatNotFound')].some((p) => reply.startsWith(p));
+      if (needsAi && getClaudeKey()) {
+        const waiting = chatAppend('bot', t('chatAiThinking'));
+        try {
+          const ai = await chatAiInterpret(text);
+          waiting.remove();
+          if (ai && ai.actions.length) reply = (await runChatActions(ai.actions)) + (ai.reply ? '\n' + ai.reply : '');
+          else if (ai && ai.reply) reply = ai.reply;
+        } catch (e) { waiting.remove(); reply = `${t('chatAiFail')} ${e.message || ''}`; }
+      }
+    }
   } catch (e) {
     reply = t('chatUnknown') + '\n' + t('chatExamples');
   }
@@ -2896,83 +3197,6 @@ function renderClosedSettings() {
   });
 }
 
-/* ---------- 設定モーダル: 「Googleマップから取得」— 店名やリンクから店舗を検索して Place ID を設定 ---------- */
-function parseGoogleQuery(q) {
-  const s = String(q || '').trim();
-  const pid = s.match(/place_id[:=]([A-Za-z0-9_-]{10,})/) || s.match(/\b(ChIJ[A-Za-z0-9_-]{10,})\b/);
-  if (pid) return { placeId: pid[1] };
-  const m = s.match(/\/maps\/place\/([^/?#]+)/) || s.match(/[?&]q(?:uery)?=([^&#]+)/);
-  if (m) { try { return { text: decodeURIComponent(m[1].replace(/\+/g, ' ')) }; } catch (e) { return { text: m[1] }; } }
-  return { text: s };
-}
-async function findPlaceFromGoogle() {
-  const key = document.getElementById('sGoogleApiKey').value.trim();
-  const q = parseGoogleQuery(document.getElementById('sGoogleQuery').value);
-  const list = document.getElementById('googleCandidates');
-  if (!key) { alert(t('googleFindNeedKey')); return; }
-  if (q.placeId) { document.getElementById('sGooglePlaceId').value = q.placeId; list.classList.add('hidden'); await importStoreInfoFromGoogle(); return; }
-  if (!q.text) { alert(t('googleFindNeedQuery')); return; }
-  const btn = document.getElementById('btnGoogleFind');
-  btn.disabled = true;
-  try {
-    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress' },
-      body: JSON.stringify({ textQuery: q.text, languageCode: state.settings.lang || 'ja', maxResultCount: 5 }),
-    });
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`;
-      try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (err) { /* ignore */ }
-      throw new Error(msg);
-    }
-    const places = ((await res.json()).places || []).filter((p) => p.id);
-    if (!places.length) { alert(t('googleFindNone')); return; }
-    list.innerHTML = `<div class="cand-note">${esc(t('googleFindPick'))}</div>` + places.map((p) =>
-      `<button type="button" class="cand" data-pid="${esc(p.id)}"><b>${esc(p.displayName ? p.displayName.text : p.id)}</b><span>${esc(p.formattedAddress || '')}</span></button>`).join('');
-    list.classList.remove('hidden');
-    list.querySelectorAll('.cand').forEach((b) => b.addEventListener('click', async () => {
-      document.getElementById('sGooglePlaceId').value = b.dataset.pid;
-      list.classList.add('hidden');
-      await importStoreInfoFromGoogle();
-    }));
-  } catch (e) {
-    alert(`${t('googleImportError')} ${e.message || ''}`);
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-/* ---------- 設定モーダル: Google マップから店舗情報を取り込む（空欄のみ埋める。保存はユーザーが確認して行う） ---------- */
-async function importStoreInfoFromGoogle() {
-  const pid = document.getElementById('sGooglePlaceId').value.trim();
-  const key = document.getElementById('sGoogleApiKey').value.trim();
-  if (!pid || !key) { alert(t('googleImportNeed')); return; }
-  const btn = document.getElementById('btnGoogleImport');
-  btn.disabled = true;
-  try {
-    const fields = GOOGLE_PLACE_FIELDS.split(',').filter((f) => f !== 'reviews' && f !== 'photos').join(',');
-    const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(pid)}?languageCode=${encodeURIComponent(state.settings.lang || 'ja')}`, {
-      headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': fields },
-    });
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`;
-      try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (err) { /* ignore */ }
-      throw new Error(msg);
-    }
-    const info = googlePlaceToInfo(await res.json(), state.settings.lang);
-    let n = 0;
-    Object.entries(info).forEach(([k, v]) => {
-      const el = document.getElementById(settingInputId(k));
-      if (el && !el.value.trim() && v) { el.value = v; n += 1; }
-    });
-    alert(n ? t('googleImportDone').replace('{n}', n) : t('googleImportNone'));
-  } catch (e) {
-    alert(`${t('googleImportError')} ${e.message || ''}`);
-  } finally {
-    btn.disabled = false;
-  }
-}
-
 /* ---------- 設定モーダル: コース・タグのマスタ編集 ---------- */
 /* コースマスタ（名称・料金・説明。予約サイトのコース一覧に表示） */
 function renderCourseRows() {
@@ -3049,8 +3273,6 @@ function importJsonFile(file) {
         load(); // 旧形式の移行処理も適用
       }
       // 復元データに平文の Claude キーがあり、ロックが有効なら暗号化し直す
-      if (lockEnabled() && lockState.cryptoKey) reencryptKeysAllStores(lockState.cryptoKey, lockState.cryptoKey);
-      else loadSessionKeys();
       document.getElementById('settingsModal').classList.add('hidden');
       renderAll();
     } catch (e) {
@@ -3144,26 +3366,24 @@ async function init() {
   document.getElementById('storeSwitch').addEventListener('change', (e) => {
     if (e.target.value === '__add') addStore(); else switchStore(e.target.value);
   });
-  // 端末ロック（PIN）
-  document.getElementById('btnUnlock').addEventListener('click', tryUnlock);
-  document.getElementById('lockPin').addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
-  ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => document.addEventListener(ev, touchActivity, { passive: true }));
-  setInterval(checkAutoLock, 15000);
-  document.addEventListener('visibilitychange', () => { if (document.hidden && lockEnabled()) lockApp(); });
-  document.getElementById('btnLockSave').addEventListener('click', saveLockSettings);
-  document.getElementById('btnLockClear').addEventListener('click', removeLock);
-  if (lockEnabled()) lockApp();
+  // 管理者設定
+  document.getElementById('railAdmin').addEventListener('click', openAdminModal);
+  document.getElementById('btnAdminPhone').addEventListener('click', openAdminModal);
+  document.getElementById('btnAdminClose').addEventListener('click', closeAdminModal);
+  document.getElementById('btnAdminCancel').addEventListener('click', closeAdminModal);
+  document.getElementById('btnAdminSave').addEventListener('click', () => saveAdmin(true));
+  document.getElementById('btnAdminAddStore').addEventListener('click', async () => { await saveAdmin(false); addStore(); openAdminModal(); });
+  document.getElementById('btnAddExtra').addEventListener('click', () => { extraWork.push({ label: '', value: '' }); renderExtraRows(); const inputs = document.querySelectorAll('#storeExtraRows .ex-label'); inputs[inputs.length - 1]?.focus(); });
   // バックアップ催促
   document.getElementById('btnBackupNow').addEventListener('click', exportJson);
   document.getElementById('btnBackupDismiss').addEventListener('click', () => { registry.backupDismissed = todayStr(); saveRegistry(); renderBackupNote(); });
   // API キーの表示切替
   document.getElementById('sClaudeShow').addEventListener('change', (e) => { document.getElementById('sClaudeApiKey').type = e.target.checked ? 'text' : 'password'; });
   document.getElementById('sGoogleShow').addEventListener('change', (e) => { document.getElementById('sGoogleApiKey').type = e.target.checked ? 'text' : 'password'; });
-  document.getElementById('btnGoogleImport').addEventListener('click', importStoreInfoFromGoogle);
+  document.getElementById('btnGoogleImport').addEventListener('click', importFromAdminInputs);
   document.getElementById('btnGoogleFind').addEventListener('click', findPlaceFromGoogle);
   document.getElementById('sGoogleQuery').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); findPlaceFromGoogle(); } });
-  document.getElementById('btnAddStore').addEventListener('click', () => { document.getElementById('settingsModal').classList.add('hidden'); addStore(); });
-  document.getElementById('btnDeleteStore').addEventListener('click', deleteStore);
+
 
   const onNavClick = (e) => {
     const btn = e.target.closest('[data-view]');
