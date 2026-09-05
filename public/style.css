@@ -791,7 +791,8 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
 /* バックアップ催促 */
 .backup-note { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: #fffbeb; border-bottom: 1px solid #fde68a; color: #92400e; font-size: 13px; font-weight: 600; padding: 8px 16px; }
 .backup-note span { flex: 1; min-width: 200px; }
-.small-chk { font-size: 12.5px; color: var(--muted); margin-top: 4px; display: inline-flex; align-items: center; gap: 4px; }
+.small-chk { font-size: 12.5px; color: var(--muted); margin-top: 2px; display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; cursor: pointer; white-space: nowrap; }
+.field .small-chk input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; min-width: 0; padding: 0; margin: 0; border-radius: 4px; accent-color: var(--blue); flex: none; }
 
 /* クラウド保存 */
 .cloud-status { font-size: 12.5px; padding: 6px 16px; font-weight: 700; }
