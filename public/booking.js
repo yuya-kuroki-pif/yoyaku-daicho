@@ -368,6 +368,29 @@ function starsHtml(rating) {
   return html + '</span>';
 }
 
+/* ---------- 流入計測（閲覧・予約画面到達・予約完了。個人情報は含めない） ---------- */
+function trackEvent(type) {
+  try {
+    const st = db();
+    let sid = storeParam;
+    if (!sid) { try { sid = (JSON.parse(localStorage.getItem(LS_REGISTRY)) || {}).currentId; } catch (e) { sid = ''; } }
+    sid = sid || 'st1';
+    const site = siteParam || (((st && ownSite(st)) || {}).id) || '';
+    const key = `ev:${type}:${site}`;
+    if (type !== 'submit') { if (sessionStorage.getItem(key)) return; sessionStorage.setItem(key, '1'); }
+    let ref = '';
+    try { ref = document.referrer ? new URL(document.referrer).hostname : ''; } catch (e) { ref = ''; }
+    const ev = { t: new Date().toISOString(), type, site, ref: ref.slice(0, 100), dev: (/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth < 700) ? 'm' : 'd', utm: (new URLSearchParams(location.search).get('utm_source') || '').slice(0, 60) };
+    if (Cloud.enabled) { Cloud.track(sid, ev).catch(() => {}); return; }
+    const k = `yoyaku-events:${sid}`;
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(k)) || []; } catch (e) { list = []; }
+    list.push(ev);
+    if (list.length > 5000) list = list.slice(-5000);
+    localStorage.setItem(k, JSON.stringify(list));
+  } catch (e) { /* 計測失敗は無視 */ }
+}
+
 /* ---------- 描画 ---------- */
 function render() {
   if (Cloud.enabled && !cloudSt && !cloudErr) { document.getElementById('content').innerHTML = `<div class="closed">${esc(t('loading'))}</div>`; return; }
@@ -683,6 +706,7 @@ function setTab(next) {
 }
 function openReserve() {
   view = 'reserve';
+  trackEvent('reserve');
   if (mode === 'lookup' && !lookup.results) mode = 'book';
   try { history.replaceState(null, '', '#reserve'); } catch (e) { /* ignore */ }
   render();
@@ -1185,6 +1209,7 @@ async function submit() {
         tableIds: assign, courses: d.courses, memo: d.memo.trim(), channel: site.id,
       });
       doneRes = created;
+      trackEvent('submit');
       await refreshCloud();
     } catch (e) {
       const m = String(e.message || '');
@@ -1228,6 +1253,7 @@ async function submit() {
   fresh.reservations.push(res);
   saveDb(fresh);
   doneRes = res;
+  trackEvent('submit');
   render();
   window.scrollTo(0, 0);
 }
@@ -1253,8 +1279,10 @@ window.addEventListener('storage', (e) => { if (Cloud.enabled) return; if (e.key
 if (Cloud.enabled) {
   Cloud.init();
   render();
-  refreshCloud().then(render).catch((e) => { cloudErr = e.message || 'error'; render(); });
+  refreshCloud().then(() => { render(); trackEvent('view'); if (view === 'reserve') trackEvent('reserve'); }).catch((e) => { cloudErr = e.message || 'error'; render(); });
   setInterval(() => { if (view === 'reserve' && !doneRes) refreshCloud().then(render).catch(() => {}); }, 60000);   // 空席状況を定期更新
 } else {
   render();
+  trackEvent('view');
+  if (view === 'reserve') trackEvent('reserve');
 }

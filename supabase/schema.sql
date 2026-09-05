@@ -230,3 +230,34 @@ grant execute on function public.booking_occupancy(text, text, text) to anon, au
 grant execute on function public.booking_create(text, jsonb) to anon, authenticated;
 grant execute on function public.booking_lookup(text, text, text) to anon, authenticated;
 grant execute on function public.booking_cancel(text, text, text, text) to anon, authenticated;
+
+-- ---------- 流入計測（予約サイトの閲覧・予約画面到達・予約完了） ----------
+create table if not exists public.events (
+  id        bigserial primary key,
+  store_id  text not null references public.stores(id) on delete cascade,
+  t         timestamptz not null default now(),
+  type      text not null,      -- view / reserve / submit
+  site      text,               -- 予約サイト（経路）ID
+  ref       text,               -- リファラーのホスト名
+  dev       text,               -- m=スマホ / d=PC
+  utm       text                -- utm_source
+);
+create index if not exists events_store_t on public.events (store_id, t);
+alter table public.events enable row level security;
+drop policy if exists "staff select events" on public.events;
+create policy "staff select events" on public.events for select to authenticated using (true);
+drop policy if exists "staff delete events" on public.events;
+create policy "staff delete events" on public.events for delete to authenticated using (true);
+
+create or replace function public.booking_track(p_store text, p_event jsonb)
+returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from public.stores where id = p_store) then return; end if;
+  if coalesce(p_event->>'type', '') not in ('view', 'reserve', 'submit') then return; end if;
+  insert into public.events (store_id, type, site, ref, dev, utm)
+  values (p_store, p_event->>'type', left(coalesce(p_event->>'site', ''), 40), left(coalesce(p_event->>'ref', ''), 100),
+          left(coalesce(p_event->>'dev', ''), 1), left(coalesce(p_event->>'utm', ''), 60));
+end $$;
+revoke all on function public.booking_track(text, jsonb) from public;
+grant execute on function public.booking_track(text, jsonb) to anon, authenticated;

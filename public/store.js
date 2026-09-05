@@ -71,6 +71,17 @@ const Cloud = (() => {
     return () => client.removeChannel(ch);
   }
 
+  /* ---- 流入計測 ---- */
+  async function track(storeId, ev) {
+    const { error } = await client.rpc('booking_track', { p_store: storeId, p_event: ev });
+    if (error) fail(error);
+  }
+  async function listEvents(storeId, fromDate) {
+    const { data, error } = await client.from('events').select('t,type,site,ref,dev,utm').eq('store_id', storeId).gte('t', fromDate).order('t').limit(20000);
+    if (error) fail(error);
+    return data || [];
+  }
+
   /* ---- 認証（スタッフ） ---- */
   async function session() { const { data } = await client.auth.getSession(); return data.session; }
   async function signIn(email, password) {
@@ -109,5 +120,5 @@ const Cloud = (() => {
   }
 
   return { enabled, init, listStores, loadStore, saveDoc, upsertReservations, deleteReservations, deleteStore, renameStore, subscribe,
-    session, signIn, signOut, onAuth, bookingStore, bookingOccupancy, bookingCreate, bookingLookup, bookingCancel };
+    track, listEvents, session, signIn, signOut, onAuth, bookingStore, bookingOccupancy, bookingCreate, bookingLookup, bookingCancel };
 })();

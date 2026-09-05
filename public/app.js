@@ -2605,6 +2605,201 @@ async function chatAiInterpret(text) {
   return { actions: Array.isArray(parsed.actions) ? parsed.actions : [], reply: String(parsed.reply || '') };
 }
 
+/* ---------- マーケティング（流入分析） ----------
+ * 予約データ（経路・ステータス・人数）と、予約サイトで計測したイベント（閲覧→予約画面→予約完了）を期間で集計する。
+ * グラフは単一系列（青）の棒・折れ線に限定し、数値はすべてテーブルでも読めるようにする。 */
+let mkPeriod = 'thisMonth';
+function mkRange() {
+  const now = new Date();
+  const ymdOf = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const today = ymdOf(now);
+  if (mkPeriod === 'thisMonth') return [`${now.getFullYear()}-${pad2(now.getMonth() + 1)}-01`, ymdOf(new Date(now.getFullYear(), now.getMonth() + 1, 0))];
+  if (mkPeriod === 'lastMonth') return [`${now.getFullYear()}-${pad2(now.getMonth())}-01`.replace('-00-', '-12-'), ymdOf(new Date(now.getFullYear(), now.getMonth(), 0))].map((s, i) => i === 0 ? ymdOf(new Date(now.getFullYear(), now.getMonth() - 1, 1)) : s);
+  if (mkPeriod === 'd30') return [ymdOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)), today];
+  if (mkPeriod === 'd90') return [ymdOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 89)), today];
+  return ['0000-01-01', '9999-12-31'];
+}
+function eventsKey(id) { return `yoyaku-events:${id}`; }
+async function loadEvents(from, to) {
+  const id = registry.currentId;
+  let list = [];
+  if (cloudMode) {
+    try { list = await Cloud.listEvents(id, from === '0000-01-01' ? '2000-01-01' : from); } catch (e) { list = []; }
+  } else {
+    try { list = JSON.parse(localStorage.getItem(eventsKey(id))) || []; } catch (e) { list = []; }
+  }
+  return list.filter((ev) => { const d = String(ev.t || '').slice(0, 10); return d >= from && d <= to; });
+}
+function channelOf(r) { return r.walkIn ? 'walkin' : (r.channel && siteById(r.channel) ? r.channel : 'direct'); }
+function channelLabel(key) {
+  if (key === 'walkin') return t('walkInName');
+  if (key === 'direct') return t('channelNone');
+  const s = siteById(key);
+  return s ? s.name : key;
+}
+function pct(n, d) { return d ? `${Math.round((n / d) * 1000) / 10}%` : '—'; }
+function barHtml(value, max, label) {
+  const w = (max && value) ? Math.max(2, Math.round((value / max) * 100)) : 0;
+  return `<div class="mk-bar" data-tip="${esc(label)}"><div class="mk-bar-fill" style="width:${w}%"></div></div>`;
+}
+
+async function renderMarketing() {
+  const wrap = document.getElementById('mkWrap');
+  const [from, to] = mkRange();
+  document.getElementById('mkPeriod').value = mkPeriod;
+  document.getElementById('mkRange').textContent = mkPeriod === 'all' ? t('mkAllTime') : `${fmtYmd(from)} 〜 ${fmtYmd(to)}`;
+  const rs = state.reservations.filter((r) => r.status !== 'block' && r.date >= from && r.date <= to);
+  const active = rs.filter((r) => r.status !== 'cancelled' && r.status !== 'noshow');
+  const paxOf = (list) => list.reduce((a, r) => a + (r.adults || 0) + (r.children || 0), 0);
+  const visited = rs.filter((r) => r.status === 'seated' || r.status === 'finished');
+  const events = await loadEvents(from, to);
+
+  // ---- KPI ----
+  const net = rs.filter((r) => !!r.code || (r.channel && siteById(r.channel)));
+  const firstVisitKeys = new Set();
+  const seenBefore = new Map();
+  state.reservations.filter((r) => r.status !== 'block').sort((a, b) => a.date.localeCompare(b.date)).forEach((r) => {
+    const k = custKey(r);
+    if (!k) return;
+    if (r.date >= from && r.date <= to && !seenBefore.has(k)) firstVisitKeys.add(r.id);
+    if (r.date < from) seenBefore.set(k, true);
+  });
+  const kpis = [
+    [t('mkKpiRes'), `${rs.length}`, t('groupsUnit')],
+    [t('mkKpiPax'), `${paxOf(active)}`, t('guestsUnit')],
+    [t('mkKpiNet'), pct(net.length, rs.length), ''],
+    [t('mkKpiVisit'), pct(visited.length, rs.filter((r) => r.status !== 'cancelled').length), ''],
+    [t('mkKpiCancel'), pct(rs.filter((r) => r.status === 'cancelled').length, rs.length), ''],
+    [t('mkKpiNoshow'), pct(rs.filter((r) => r.status === 'noshow').length, rs.length), ''],
+    [t('mkKpiNew'), pct(firstVisitKeys.size, rs.filter((r) => custKey(r)).length), ''],
+  ];
+  let html = `<div class="mk-kpis">${kpis.map(([k, v, u]) => `<div class="mk-kpi"><div class="mk-k">${esc(k)}</div><div class="mk-v">${esc(v)}<small>${esc(u)}</small></div></div>`).join('')}</div>`;
+
+  // ---- 経路別 ----
+  const chMap = new Map();
+  rs.forEach((r) => {
+    const k = channelOf(r);
+    const c = chMap.get(k) || { key: k, count: 0, pax: 0, visited: 0, cancelled: 0, noshow: 0 };
+    c.count += 1;
+    if (r.status !== 'cancelled' && r.status !== 'noshow') c.pax += (r.adults || 0) + (r.children || 0);
+    if (r.status === 'seated' || r.status === 'finished') c.visited += 1;
+    if (r.status === 'cancelled') c.cancelled += 1;
+    if (r.status === 'noshow') c.noshow += 1;
+    chMap.set(k, c);
+  });
+  const channels = [...chMap.values()].sort((a, b) => b.count - a.count);
+  const maxCh = Math.max(0, ...channels.map((c) => c.count));
+  html += `<div class="card mk-card"><h2>${esc(t('mkChannelHead'))}</h2>` +
+    (channels.length ? `<table class="mk-table"><thead><tr><th>${esc(t('channel'))}</th><th class="num">${esc(t('mkKpiRes'))}</th><th class="mk-barcol"></th><th class="num">${esc(t('mkShare'))}</th><th class="num">${esc(t('guestsUnit'))}</th><th class="num">${esc(t('mkVisited'))}</th><th class="num">${esc(statusLabel('cancelled'))}</th><th class="num">${esc(statusLabel('noshow'))}</th></tr></thead><tbody>` +
+      channels.map((c) => {
+        const s = siteById(c.key);
+        const dot = s ? `<span class="ch-dot" style="background:${safeColor(s.color)}"></span>` : '';
+        return `<tr><td>${dot}${esc(channelLabel(c.key))}</td><td class="num">${c.count}</td><td class="mk-barcol">${barHtml(c.count, maxCh, `${channelLabel(c.key)}: ${c.count}${t('groupsUnit')}`)}</td><td class="num">${pct(c.count, rs.length)}</td><td class="num">${c.pax}</td><td class="num">${c.visited}</td><td class="num">${c.cancelled}</td><td class="num">${c.noshow}</td></tr>`;
+      }).join('') + `</tbody></table>` : `<div class="empty-note">${esc(t('noReservations'))}</div>`) + `</div>`;
+
+  // ---- 予約サイトのファネル（閲覧 → 予約画面 → 予約完了） ----
+  const sites = state.sites || [];
+  const funnel = sites.map((s) => {
+    const ev = events.filter((e) => e.site === s.id);
+    const views = ev.filter((e) => e.type === 'view').length;
+    const reserve = ev.filter((e) => e.type === 'reserve').length;
+    const submit = ev.filter((e) => e.type === 'submit').length;
+    const booked = rs.filter((r) => r.channel === s.id && r.code).length;
+    return { s, views, reserve, submit, booked };
+  });
+  const maxViews = Math.max(0, ...funnel.map((f) => f.views));
+  const anyEvents = events.length > 0;
+  html += `<div class="card mk-card"><h2>${esc(t('mkFunnelHead'))}<span class="sub">${esc(t('mkFunnelNote'))}</span></h2>` +
+    `<table class="mk-table"><thead><tr><th>${esc(t('sites'))}</th><th class="num">${esc(t('mkViews'))}</th><th class="mk-barcol"></th><th class="num">${esc(t('mkReserveView'))}</th><th class="num">${esc(t('mkSubmit'))}</th><th class="num">${esc(t('mkCvr'))}</th><th class="num">${esc(t('mkBooked'))}</th></tr></thead><tbody>` +
+    funnel.map((f) => `<tr><td><span class="ch-dot" style="background:${safeColor(f.s.color)}"></span>${esc(f.s.name)}${f.s.enabled ? '' : ` <span class="mk-off">${esc(t('acceptOff'))}</span>`}</td><td class="num">${f.views}</td><td class="mk-barcol">${barHtml(f.views, maxViews, `${f.s.name}: ${f.views}`)}</td><td class="num">${f.reserve}</td><td class="num">${f.submit}</td><td class="num">${pct(f.submit, f.views)}</td><td class="num">${f.booked}</td></tr>`).join('') +
+    `</tbody></table>` + (anyEvents ? '' : `<p class="mk-hint">${esc(t('mkNoEvents'))}</p>`) + `</div>`;
+
+  // ---- 流入元（リファラー / utm_source / 端末） ----
+  const refMap = new Map();
+  events.filter((e) => e.type === 'view').forEach((e) => { const k = e.utm || e.ref || ''; refMap.set(k, (refMap.get(k) || 0) + 1); });
+  const refs = [...refMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const maxRef = Math.max(0, ...refs.map((x) => x[1]));
+  const devM = events.filter((e) => e.type === 'view' && e.dev === 'm').length;
+  const devD = events.filter((e) => e.type === 'view' && e.dev === 'd').length;
+  html += `<div class="card mk-card"><h2>${esc(t('mkRefHead'))}<span class="sub">${esc(t('mkDevices'))}: 📱 ${devM} / 💻 ${devD}</span></h2>` +
+    (refs.length ? `<table class="mk-table"><thead><tr><th>${esc(t('mkRefSource'))}</th><th class="num">${esc(t('mkViews'))}</th><th class="mk-barcol"></th></tr></thead><tbody>` +
+      refs.map(([k, n]) => `<tr><td>${esc(k || t('mkRefDirect'))}</td><td class="num">${n}</td><td class="mk-barcol">${barHtml(n, maxRef, `${k || t('mkRefDirect')}: ${n}`)}</td></tr>`).join('') + `</tbody></table>` : `<div class="empty-note">${esc(t('mkNoEvents'))}</div>`) + `</div>`;
+
+  // ---- 日別推移（予約件数：来店日ベース） ----
+  const dayMap = new Map();
+  rs.forEach((r) => dayMap.set(r.date, (dayMap.get(r.date) || 0) + 1));
+  const days = [...dayMap.keys()].sort();
+  if (days.length) {
+    const first = mkPeriod === 'all' ? days[0] : from;
+    const last = mkPeriod === 'all' ? days[days.length - 1] : to;
+    const series = [];
+    for (let d = first; d <= last; d = addDaysStr(d, 1)) series.push([d, dayMap.get(d) || 0]);
+    if (series.length > 400) series.splice(0, series.length - 400);
+    html += `<div class="card mk-card"><h2>${esc(t('mkTrendHead'))}</h2>${lineChartHtml(series)}</div>`;
+  }
+
+  // ---- 曜日別 ----
+  const wdCounts = [0, 0, 0, 0, 0, 0, 0];
+  active.forEach((r) => { const [y, m, d] = r.date.split('-').map(Number); wdCounts[new Date(y, m - 1, d).getDay()] += 1; });
+  const maxWd = Math.max(0, ...wdCounts);
+  html += `<div class="card mk-card"><h2>${esc(t('mkWeekdayHead'))}</h2><div class="mk-cols">` +
+    wdCounts.map((n, i) => `<div class="mk-col" data-tip="${esc(dict().weekdays[i])}: ${n}${esc(t('groupsUnit'))}"><div class="mk-col-fill" style="height:${(maxWd && n) ? Math.max(2, Math.round((n / maxWd) * 100)) : 0}%"></div><div class="mk-col-v">${n}</div><div class="mk-col-k">${esc(dict().weekdays[i])}</div></div>`).join('') +
+    `</div></div>`;
+
+  wrap.innerHTML = html;
+  bindTips(wrap);
+  mkExport = { rs, channels, funnel, refs, from, to };
+}
+function addDaysStr(date, n) {
+  const [y, m, d] = date.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + n);
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+}
+/* 単一系列の折れ線（SVG）。点にホバーで値を表示 */
+function lineChartHtml(series) {
+  const W = 720, H = 180, L = 32, R = 10, T = 12, B = 28;
+  const max = Math.max(1, ...series.map((p) => p[1]));
+  const n = series.length;
+  const x = (i) => L + (n > 1 ? (i / (n - 1)) * (W - L - R) : (W - L - R) / 2);
+  const y = (v) => T + (1 - v / max) * (H - T - B);
+  const pts = series.map((p, i) => `${x(i).toFixed(1)},${y(p[1]).toFixed(1)}`).join(' ');
+  const gridVals = [0, Math.ceil(max / 2), max];
+  const grid = gridVals.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="mk-grid"/><text x="${L - 6}" y="${(y(v) + 4).toFixed(1)}" class="mk-axis" text-anchor="end">${v}</text>`).join('');
+  const step = Math.max(1, Math.ceil(n / 8));
+  const xl = series.map((p, i) => (i % step === 0 || i === n - 1) ? `<text x="${x(i).toFixed(1)}" y="${H - 8}" class="mk-axis" text-anchor="middle">${esc(p[0].slice(5).replace('-', '/'))}</text>` : '').join('');
+  const dots = series.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p[1]).toFixed(1)}" r="4" class="mk-dot" data-tip="${esc(fmtYmd(p[0]))}: ${p[1]}${esc(t('groupsUnit'))}"></circle>`).join('');
+  return `<div class="mk-line-wrap"><svg viewBox="0 0 ${W} ${H}" class="mk-line" preserveAspectRatio="none" role="img">${grid}<polyline points="${pts}" class="mk-path"/>${dots}${xl}</svg></div>`;
+}
+let mkExport = null;
+function bindTips(root) {
+  const tip = document.getElementById('mkTip');
+  root.querySelectorAll('[data-tip]').forEach((el) => {
+    el.addEventListener('mouseenter', (e) => { tip.textContent = el.dataset.tip; tip.classList.remove('hidden'); moveTip(e); });
+    el.addEventListener('mousemove', moveTip);
+    el.addEventListener('mouseleave', () => tip.classList.add('hidden'));
+    el.addEventListener('click', (e) => { tip.textContent = el.dataset.tip; tip.classList.remove('hidden'); moveTip(e); setTimeout(() => tip.classList.add('hidden'), 1800); });
+  });
+  function moveTip(e) {
+    tip.style.left = Math.min(window.innerWidth - tip.offsetWidth - 8, e.clientX + 12) + 'px';
+    tip.style.top = Math.max(8, e.clientY - 34) + 'px';
+  }
+}
+function exportMarketingCsv() {
+  if (!mkExport) return;
+  const rows = [[t('mkChannelHead'), mkExport.from, mkExport.to]];
+  rows.push([t('channel'), t('mkKpiRes'), t('guestsUnit'), t('mkVisited'), statusLabel('cancelled'), statusLabel('noshow')]);
+  mkExport.channels.forEach((c) => rows.push([channelLabel(c.key), c.count, c.pax, c.visited, c.cancelled, c.noshow]));
+  rows.push([]);
+  rows.push([t('mkFunnelHead')]);
+  rows.push([t('sites'), t('mkViews'), t('mkReserveView'), t('mkSubmit'), t('mkBooked')]);
+  mkExport.funnel.forEach((f) => rows.push([f.s.name, f.views, f.reserve, f.submit, f.booked]));
+  rows.push([]);
+  rows.push([t('mkRefHead')]);
+  mkExport.refs.forEach(([k, n]) => rows.push([k || t('mkRefDirect'), n]));
+  const csv = '﻿' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
+  downloadFile(`marketing-${todayStr()}.csv`, csv, 'text/csv;charset=utf-8');
+}
+
 /* ---------- バックアップの催促（7日以上未保存なら上部に表示） ---------- */
 function renderBackupNote() {
   const bn = document.getElementById('backupNote');
@@ -3355,6 +3550,7 @@ function setView(v) {
   document.getElementById('view-sites').classList.toggle('hidden', v !== 'sites');
   document.getElementById('view-chat').classList.toggle('hidden', v !== 'chat');
   document.getElementById('view-calendar').classList.toggle('hidden', v !== 'calendar');
+  document.getElementById('view-marketing').classList.toggle('hidden', v !== 'marketing');
   if (v === 'chat' && !document.getElementById('chatLog').childElementCount) {
     chatAppend('bot', t('chatHello') + '\n' + t('chatExamples'));
   }
@@ -3371,6 +3567,7 @@ function renderAll() {
   else if (view === 'sites') renderSites();
   else if (view === 'customers') renderCustomers();
   else if (view === 'calendar') renderCalendar();
+  else if (view === 'marketing') renderMarketing();
   /* chat はDOMを保持するため再描画しない */
 }
 
@@ -3401,6 +3598,10 @@ async function init() {
   document.getElementById('storeSwitch').addEventListener('change', (e) => {
     if (e.target.value === '__add') addStore(); else switchStore(e.target.value);
   });
+  // マーケティング
+  document.getElementById('mkPeriod').addEventListener('change', (e) => { mkPeriod = e.target.value; renderMarketing(); });
+  document.getElementById('btnMkCsv').addEventListener('click', exportMarketingCsv);
+  document.getElementById('btnMarketingPhone').addEventListener('click', () => setView('marketing'));
   // 管理者設定
   document.getElementById('railAdmin').addEventListener('click', openAdminModal);
   document.getElementById('btnAdminPhone').addEventListener('click', openAdminModal);
