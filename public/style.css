@@ -860,3 +860,7 @@ main { flex: 1; overflow: hidden; display: flex; min-height: 0; }
 .mk-multi { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 6px; }
 .mk-multi h3 { font-size: 13px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
 .mk-multi .mk-line { height: 160px; }
+
+.mk-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; align-items: stretch; }
+.mk-row .mk-card { margin-bottom: 12px; min-width: 0; }
+.mk-row .mk-line { height: 170px; }

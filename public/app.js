@@ -2755,7 +2755,8 @@ async function renderMarketing() {
     (refs.length ? `<table class="mk-table"><thead><tr><th>${esc(t('mkRefSource'))}</th><th class="num">${esc(t('mkImpressions'))}</th><th class="mk-barcol"></th><th class="num">${esc(t('mkConversions'))}</th><th class="num">${esc(t('mkCvr'))}</th></tr></thead><tbody>` +
       refs.map(([k, n, cv]) => `<tr><td>${esc(k || t('mkRefDirect'))}</td><td class="num">${n}</td><td class="mk-barcol">${barHtml(n, maxRef, `${k || t('mkRefDirect')}: ${n}`)}</td><td class="num">${cv}</td><td class="num">${pct(cv, n)}</td></tr>`).join('') + `</tbody></table>` : `<div class="empty-note">${esc(t('mkNoEvents'))}</div>`) + `</div>`;
 
-  // ---- 日別推移（予約件数：来店日ベース） ----
+  // ---- 日別推移・曜日別（横並び） ----
+  html += '<div class="mk-row">';
   const dayMap = new Map();
   rs.forEach((r) => dayMap.set(r.date, (dayMap.get(r.date) || 0) + 1));
   const days = [...dayMap.keys()].sort();
@@ -2766,6 +2767,8 @@ async function renderMarketing() {
     for (let d = first; d <= last; d = addDaysStr(d, 1)) series.push([d, dayMap.get(d) || 0]);
     if (series.length > 400) series.splice(0, series.length - 400);
     html += `<div class="card mk-card"><h2>${esc(t('mkTrendHead'))}</h2>${lineChartHtml(series)}</div>`;
+  } else {
+    html += `<div class="card mk-card"><h2>${esc(t('mkTrendHead'))}</h2><div class="empty-note">${esc(t('noReservations'))}</div></div>`;
   }
 
   // ---- 曜日別 ----
@@ -2775,6 +2778,7 @@ async function renderMarketing() {
   html += `<div class="card mk-card"><h2>${esc(t('mkWeekdayHead'))}</h2><div class="mk-cols">` +
     wdCounts.map((n, i) => `<div class="mk-col" data-tip="${esc(dict().weekdays[i])}: ${n}${esc(t('groupsUnit'))}"><div class="mk-col-fill" style="height:${(maxWd && n) ? Math.max(2, Math.round((n / maxWd) * 100)) : 0}%"></div><div class="mk-col-v">${n}</div><div class="mk-col-k">${esc(dict().weekdays[i])}</div></div>`).join('') +
     `</div></div>`;
+  html += '</div>';
 
   wrap.innerHTML = html;
   bindTips(wrap);
