@@ -2628,7 +2628,7 @@ async function loadEvents(from, to) {
   } else {
     try { list = JSON.parse(localStorage.getItem(eventsKey(id))) || []; } catch (e) { list = []; }
   }
-  return list.filter((ev) => { const d = String(ev.t || '').slice(0, 10); return d >= from && d <= to; });
+  return list.filter((ev) => { const dt = new Date(ev.t); if (isNaN(dt)) return false; const d = `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`; return d >= from && d <= to; });
 }
 function channelOf(r) { return r.walkIn ? 'walkin' : (r.channel && siteById(r.channel) ? r.channel : 'direct'); }
 function channelLabel(key) {
@@ -2675,6 +2675,36 @@ async function renderMarketing() {
   ];
   let html = `<div class="mk-kpis">${kpis.map(([k, v, u]) => `<div class="mk-kpi"><div class="mk-k">${esc(k)}</div><div class="mk-v">${esc(v)}<small>${esc(u)}</small></div></div>`).join('')}</div>`;
 
+
+  // ---- インプレッション → コンバージョン（予約サイトの計測ベース） ----
+  const evDay = (e) => { const d = new Date(e.t); return isNaN(d) ? '' : `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+  const imps = events.filter((e) => e.type === 'view');
+  const reserves = events.filter((e) => e.type === 'reserve');
+  const convs = events.filter((e) => e.type === 'submit');
+  const impTiles = [
+    [t('mkImpressions'), `${imps.length}`, t('mkImpUnit')],
+    [t('mkReserveView'), `${reserves.length}`, ''],
+    [t('mkConversions'), `${convs.length}`, t('groupsUnit')],
+    [t('mkCvr'), pct(convs.length, imps.length), ''],
+  ];
+  html += `<div class="card mk-card"><h2>${esc(t('mkImpHead'))}<span class="sub">${esc(t('mkImpNote'))}</span></h2>` +
+    `<div class="mk-kpis mk-kpis-inline">${impTiles.map(([k, v, u]) => `<div class="mk-kpi"><div class="mk-k">${esc(k)}</div><div class="mk-v">${esc(v)}<small>${esc(u)}</small></div></div>`).join('')}</div>`;
+  if (events.length) {
+    const dayKeys = events.map(evDay).filter(Boolean).sort();
+    const first = mkPeriod === 'all' ? dayKeys[0] : from;
+    const last = mkPeriod === 'all' ? dayKeys[dayKeys.length - 1] : to;
+    const impMap = new Map(); const cvMap = new Map();
+    imps.forEach((e) => { const d = evDay(e); impMap.set(d, (impMap.get(d) || 0) + 1); });
+    convs.forEach((e) => { const d = evDay(e); cvMap.set(d, (cvMap.get(d) || 0) + 1); });
+    const sImp = []; const sCv = [];
+    for (let d = first; d <= last; d = addDaysStr(d, 1)) { sImp.push([d, impMap.get(d) || 0]); sCv.push([d, cvMap.get(d) || 0]); }
+    if (sImp.length > 400) { sImp.splice(0, sImp.length - 400); sCv.splice(0, sCv.length - 400); }
+    html += `<div class="mk-multi"><div><h3>${esc(t('mkImpTrend'))}</h3>${lineChartHtml(sImp, t('mkImpUnit'))}</div><div><h3>${esc(t('mkCvTrend'))}</h3>${lineChartHtml(sCv, t('groupsUnit'))}</div></div>`;
+  } else {
+    html += `<p class="mk-hint">${esc(t('mkNoEvents'))}</p>`;
+  }
+  html += '</div>';
+
   // ---- 経路別 ----
   const chMap = new Map();
   rs.forEach((r) => {
@@ -2710,20 +2740,20 @@ async function renderMarketing() {
   const maxViews = Math.max(0, ...funnel.map((f) => f.views));
   const anyEvents = events.length > 0;
   html += `<div class="card mk-card"><h2>${esc(t('mkFunnelHead'))}<span class="sub">${esc(t('mkFunnelNote'))}</span></h2>` +
-    `<table class="mk-table"><thead><tr><th>${esc(t('sites'))}</th><th class="num">${esc(t('mkViews'))}</th><th class="mk-barcol"></th><th class="num">${esc(t('mkReserveView'))}</th><th class="num">${esc(t('mkSubmit'))}</th><th class="num">${esc(t('mkCvr'))}</th><th class="num">${esc(t('mkBooked'))}</th></tr></thead><tbody>` +
+    `<table class="mk-table"><thead><tr><th>${esc(t('sites'))}</th><th class="num">${esc(t('mkImpressions'))}</th><th class="mk-barcol"></th><th class="num">${esc(t('mkReserveView'))}</th><th class="num">${esc(t('mkConversions'))}</th><th class="num">${esc(t('mkCvr'))}</th><th class="num">${esc(t('mkBooked'))}</th></tr></thead><tbody>` +
     funnel.map((f) => `<tr><td><span class="ch-dot" style="background:${safeColor(f.s.color)}"></span>${esc(f.s.name)}${f.s.enabled ? '' : ` <span class="mk-off">${esc(t('acceptOff'))}</span>`}</td><td class="num">${f.views}</td><td class="mk-barcol">${barHtml(f.views, maxViews, `${f.s.name}: ${f.views}`)}</td><td class="num">${f.reserve}</td><td class="num">${f.submit}</td><td class="num">${pct(f.submit, f.views)}</td><td class="num">${f.booked}</td></tr>`).join('') +
     `</tbody></table>` + (anyEvents ? '' : `<p class="mk-hint">${esc(t('mkNoEvents'))}</p>`) + `</div>`;
 
   // ---- 流入元（リファラー / utm_source / 端末） ----
   const refMap = new Map();
-  events.filter((e) => e.type === 'view').forEach((e) => { const k = e.utm || e.ref || ''; refMap.set(k, (refMap.get(k) || 0) + 1); });
-  const refs = [...refMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  events.filter((e) => e.type === 'view' || e.type === 'submit').forEach((e) => { const k = e.utm || e.ref || ''; const c = refMap.get(k) || { imp: 0, cv: 0 }; if (e.type === 'view') c.imp += 1; else c.cv += 1; refMap.set(k, c); });
+  const refs = [...refMap.entries()].map(([k, c]) => [k, c.imp, c.cv]).sort((a, b) => b[1] - a[1]).slice(0, 10);
   const maxRef = Math.max(0, ...refs.map((x) => x[1]));
   const devM = events.filter((e) => e.type === 'view' && e.dev === 'm').length;
   const devD = events.filter((e) => e.type === 'view' && e.dev === 'd').length;
   html += `<div class="card mk-card"><h2>${esc(t('mkRefHead'))}<span class="sub">${esc(t('mkDevices'))}: 📱 ${devM} / 💻 ${devD}</span></h2>` +
-    (refs.length ? `<table class="mk-table"><thead><tr><th>${esc(t('mkRefSource'))}</th><th class="num">${esc(t('mkViews'))}</th><th class="mk-barcol"></th></tr></thead><tbody>` +
-      refs.map(([k, n]) => `<tr><td>${esc(k || t('mkRefDirect'))}</td><td class="num">${n}</td><td class="mk-barcol">${barHtml(n, maxRef, `${k || t('mkRefDirect')}: ${n}`)}</td></tr>`).join('') + `</tbody></table>` : `<div class="empty-note">${esc(t('mkNoEvents'))}</div>`) + `</div>`;
+    (refs.length ? `<table class="mk-table"><thead><tr><th>${esc(t('mkRefSource'))}</th><th class="num">${esc(t('mkImpressions'))}</th><th class="mk-barcol"></th><th class="num">${esc(t('mkConversions'))}</th><th class="num">${esc(t('mkCvr'))}</th></tr></thead><tbody>` +
+      refs.map(([k, n, cv]) => `<tr><td>${esc(k || t('mkRefDirect'))}</td><td class="num">${n}</td><td class="mk-barcol">${barHtml(n, maxRef, `${k || t('mkRefDirect')}: ${n}`)}</td><td class="num">${cv}</td><td class="num">${pct(cv, n)}</td></tr>`).join('') + `</tbody></table>` : `<div class="empty-note">${esc(t('mkNoEvents'))}</div>`) + `</div>`;
 
   // ---- 日別推移（予約件数：来店日ベース） ----
   const dayMap = new Map();
@@ -2748,7 +2778,7 @@ async function renderMarketing() {
 
   wrap.innerHTML = html;
   bindTips(wrap);
-  mkExport = { rs, channels, funnel, refs, from, to };
+  mkExport = { rs, channels, funnel, refs, from, to, imp: imps.length, cv: convs.length };
 }
 function addDaysStr(date, n) {
   const [y, m, d] = date.split('-').map(Number);
@@ -2756,7 +2786,8 @@ function addDaysStr(date, n) {
   return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
 }
 /* 単一系列の折れ線（SVG）。点にホバーで値を表示 */
-function lineChartHtml(series) {
+function lineChartHtml(series, unit) {
+  unit = unit == null ? t('groupsUnit') : unit;
   const W = 720, H = 180, L = 32, R = 10, T = 12, B = 28;
   const max = Math.max(1, ...series.map((p) => p[1]));
   const n = series.length;
@@ -2767,7 +2798,7 @@ function lineChartHtml(series) {
   const grid = gridVals.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="mk-grid"/><text x="${L - 6}" y="${(y(v) + 4).toFixed(1)}" class="mk-axis" text-anchor="end">${v}</text>`).join('');
   const step = Math.max(1, Math.ceil(n / 8));
   const xl = series.map((p, i) => (i % step === 0 || i === n - 1) ? `<text x="${x(i).toFixed(1)}" y="${H - 8}" class="mk-axis" text-anchor="middle">${esc(p[0].slice(5).replace('-', '/'))}</text>` : '').join('');
-  const dots = series.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p[1]).toFixed(1)}" r="4" class="mk-dot" data-tip="${esc(fmtYmd(p[0]))}: ${p[1]}${esc(t('groupsUnit'))}"></circle>`).join('');
+  const dots = series.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p[1]).toFixed(1)}" r="4" class="mk-dot" data-tip="${esc(fmtYmd(p[0]))}: ${p[1]}${esc(unit)}"></circle>`).join('');
   return `<div class="mk-line-wrap"><svg viewBox="0 0 ${W} ${H}" class="mk-line" preserveAspectRatio="none" role="img">${grid}<polyline points="${pts}" class="mk-path"/>${dots}${xl}</svg></div>`;
 }
 let mkExport = null;
@@ -2791,11 +2822,14 @@ function exportMarketingCsv() {
   mkExport.channels.forEach((c) => rows.push([channelLabel(c.key), c.count, c.pax, c.visited, c.cancelled, c.noshow]));
   rows.push([]);
   rows.push([t('mkFunnelHead')]);
-  rows.push([t('sites'), t('mkViews'), t('mkReserveView'), t('mkSubmit'), t('mkBooked')]);
+  rows.push([t('sites'), t('mkImpressions'), t('mkReserveView'), t('mkConversions'), t('mkBooked')]);
   mkExport.funnel.forEach((f) => rows.push([f.s.name, f.views, f.reserve, f.submit, f.booked]));
   rows.push([]);
+  rows.push([t('mkImpHead'), t('mkImpressions'), mkExport.imp, t('mkConversions'), mkExport.cv]);
+  rows.push([]);
   rows.push([t('mkRefHead')]);
-  mkExport.refs.forEach(([k, n]) => rows.push([k || t('mkRefDirect'), n]));
+  rows.push([t('mkRefSource'), t('mkImpressions'), t('mkConversions')]);
+  mkExport.refs.forEach(([k, n, cv]) => rows.push([k || t('mkRefDirect'), n, cv]));
   const csv = '﻿' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
   downloadFile(`marketing-${todayStr()}.csv`, csv, 'text/csv;charset=utf-8');
 }
