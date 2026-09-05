@@ -12,7 +12,7 @@
 const LS_KEY = 'yoyaku-daicho-v1';
 const LS_REGISTRY = 'yoyaku-daicho-stores';
 const LANG_KEY = 'yoyaku-booking-lang';
-const GCACHE_KEY = 'yoyaku-google-place-cache-v3';
+const GCACHE_KEY = 'yoyaku-google-place-cache-v4';
 const MAX_GOOGLE_PHOTOS = 10;   // Places API が返す写真の上限
 const GCACHE_TTL = 6 * 60 * 60 * 1000;   // Google 取得結果のキャッシュ（6時間）
 const DUR = 120;         // 滞在想定（分）
@@ -43,7 +43,7 @@ const T = {
     latestReviews: '最新の口コミ', moreReviews: 'すべての口コミを見る', morePhotos: '写真をもっと見る', moreCourses: 'コース一覧を見る', moreInfo: '店舗情報を見る',
     ratingLabel: 'Google 評価', reviewsCount(n) { return `${n}件の口コミ`; }, ratingNone: '評価なし',
     viewOnGoogle: 'Googleマップで見る', reviewNoteSetup: '口コミ・評価は Google マップから取得して表示します。（店舗側で Google の Place ID と API キーを設定すると表示されます）',
-    reviewLoading: '口コミを読み込み中…', reviewError: '口コミを取得できませんでした。しばらくしてからもう一度お試しください。', reviewNone: 'まだ口コミがありません',
+    reviewLoading: '口コミを読み込み中…', reviewError: '口コミを取得できませんでした。しばらくしてからもう一度お試しください。', reviewNone: 'まだ口コミがありません', reviewFiltered: '一部の口コミを表示しています。すべての口コミは Google マップでご覧いただけます。',
     poweredGoogle: '口コミ・評価・一部の写真は Google 提供', readMore: '続きを読む', photoBy: '写真:',
     noCourses: 'コースは準備中です。お席のみのご予約を承ります。', noPhotos: '写真は準備中です', reserveWithCourse: 'このコースで予約',
     infoName: '店名', genre: 'ジャンル', phone: '電話番号', address: '住所', access: 'アクセス', hours: '営業時間', closedDays: '定休日',
@@ -106,7 +106,7 @@ const T = {
     latestReviews: 'Đánh giá mới nhất', moreReviews: 'Xem tất cả đánh giá', morePhotos: 'Xem thêm ảnh', moreCourses: 'Xem danh sách course', moreInfo: 'Xem thông tin cửa hàng',
     ratingLabel: 'Điểm Google', reviewsCount(n) { return `${n} đánh giá`; }, ratingNone: 'Chưa có điểm',
     viewOnGoogle: 'Xem trên Google Maps', reviewNoteSetup: 'Đánh giá được lấy từ Google Maps. (Cửa hàng cần cài đặt Place ID và API key của Google)',
-    reviewLoading: 'Đang tải đánh giá…', reviewError: 'Không tải được đánh giá. Vui lòng thử lại sau.', reviewNone: 'Chưa có đánh giá',
+    reviewLoading: 'Đang tải đánh giá…', reviewError: 'Không tải được đánh giá. Vui lòng thử lại sau.', reviewNone: 'Chưa có đánh giá', reviewFiltered: 'Chỉ hiển thị một phần đánh giá. Xem toàn bộ trên Google Maps.',
     poweredGoogle: 'Đánh giá, điểm và một số ảnh do Google cung cấp', readMore: 'Xem thêm', photoBy: 'Ảnh:',
     noCourses: 'Course đang chuẩn bị. Có thể đặt bàn không kèm course.', noPhotos: 'Ảnh đang chuẩn bị', reserveWithCourse: 'Đặt bàn với course này',
     infoName: 'Tên quán', genre: 'Loại hình', phone: 'Số điện thoại', address: 'Địa chỉ', access: 'Đường đi', hours: 'Giờ mở cửa', closedDays: 'Ngày nghỉ',
@@ -249,9 +249,37 @@ function reviewsEnabled(st) { return settings(st).showReviews !== false; }
 function googlePhotosEnabled(st) { return settings(st).showGooglePhotos !== false; }
 function allPhotos(st) {
   const own = storePhotos(st).map((u) => ({ url: u, g: false }));
-  const g = google.status === 'ok' && google.data && googlePhotosEnabled(st) ? google.data.photos.map((p) => ({ ...p, g: true })) : [];
+  const g = google.status === 'ok' && google.data && googlePhotosEnabled(st) ? applyPhotoPick(google.data.photos, settings(st).photoPick).map((p) => ({ ...p, g: true })) : [];
   return [...own, ...g];
 }
+/* 台帳（チャット）で選定した写真だけを、指定の順で表示。use が空なら hide を除く全件 */
+function applyPhotoPick(list, pick) {
+  if (!pick) return list;
+  const hide = new Set(pick.hide || []);
+  const use = (pick.use || []).filter(Boolean);
+  if (use.length) {
+    const byId = new Map(list.map((p) => [p.id, p]));
+    const out = use.map((id) => byId.get(id)).filter((p) => p && !hide.has(p.id));
+    if (out.length) return out;
+  }
+  return list.filter((p) => !hide.has(p.id));
+}
+/* 口コミの絞り込み（星・並び順・件数・キーワード・個別非表示）。総合評価と件数は常に Google の値をそのまま表示する */
+function visibleReviews(st) {
+  const list = (google.data && google.data.reviews) || [];
+  const pick = settings(st).reviewPick;
+  if (!pick) return list;
+  const hide = new Set(pick.hide || []);
+  let out = list.filter((r) => !hide.has(r.id));
+  if (pick.minRating) out = out.filter((r) => (r.rating || 0) >= pick.minRating);
+  if (pick.keyword) { const k = String(pick.keyword).toLowerCase(); out = out.filter((r) => String(r.text || '').toLowerCase().includes(k)); }
+  if (pick.sort === 'newest') out = [...out].sort((a, b) => String(b.time || '').localeCompare(String(a.time || '')));
+  else if (pick.sort === 'highest') out = [...out].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+  else if (pick.sort === 'lowest') out = [...out].sort((a, b) => (a.rating || 0) - (b.rating || 0));
+  if (pick.limit) out = out.slice(0, pick.limit);
+  return out;
+}
+function reviewsFiltered(st) { const all = (google.data && google.data.reviews) || []; return visibleReviews(st).length < all.length; }
 /* Google 写真の帰属表示（投稿者名・プロフィールへのリンク） */
 function photoCreditHtml(p) {
   if (!p.g) return '';
@@ -335,6 +363,8 @@ function loadGoogle(st) {
         mapsUri: safeUrl(data.googleMapsUri),
         info: googlePlaceToInfo(data, lang),   // 住所・電話・営業時間などの補完用
         reviews: (data.reviews || []).map((r) => ({
+          id: r.name || '',
+          time: r.publishTime || '',
           author: r.authorAttribution?.displayName || '',
           authorUri: safeUrl(r.authorAttribution?.uri),
           photo: safeUrl(r.authorAttribution?.photoUri),
@@ -345,6 +375,7 @@ function loadGoogle(st) {
         })),
         // 写真は投稿者の帰属表示（authorAttributions）付きで保持する
         photos: (data.photos || []).slice(0, MAX_GOOGLE_PHOTOS).map((p) => ({
+          id: p.name,
           url: `https://places.googleapis.com/v1/${p.name}/media?maxWidthPx=900&key=${encodeURIComponent(key)}`,
           author: p.authorAttributions?.[0]?.displayName || '',
           authorUri: safeUrl(p.authorAttributions?.[0]?.uri),
@@ -404,7 +435,7 @@ function render() {
   const counts = {
     menu: st ? (st.courses || []).length : 0,
     photo: photos.length,
-    review: google.status === 'ok' && google.data ? (google.data.reviews || []).length : 0,
+    review: google.status === 'ok' && google.data ? visibleReviews(st).length : 0,
   };
   const tabLabels = { top: t('tabTop'), menu: t('tabMenu'), photo: t('tabPhoto'), review: t('tabReview'), map: t('tabMap') };
   document.querySelectorAll('#siteTabs button').forEach((b) => {
@@ -545,9 +576,9 @@ function reviewsBlockHtml(st, limit) {
     (googleMapsLink(st) ? `<br><a href="${esc(googleMapsLink(st))}" target="_blank" rel="noopener">${esc(t('viewOnGoogle'))} ›</a></div>` : '</div>');
   if (google.status === 'loading') return `<div class="skeleton" style="width:60%"></div><div class="skeleton"></div><div class="skeleton" style="width:80%"></div>`;
   if (google.status === 'error') return `<div class="empty">${esc(t('reviewError'))}</div>`;
-  const list = (google.data && google.data.reviews) || [];
-  if (!list.length) return `<div class="empty">${esc(t('reviewNone'))}</div>`;
-  return list.slice(0, limit || list.length).map((rv) => reviewHtml(rv, !!limit)).join('');
+  const list = visibleReviews(st);
+  if (!list.length) return `<div class="empty">${esc(t('reviewNone'))}</div>` + (reviewsFiltered(st) ? `<div class="review-note">${esc(t('reviewFiltered'))}</div>` : '');
+  return list.slice(0, limit || list.length).map((rv) => reviewHtml(rv, !!limit)).join('') + (reviewsFiltered(st) && !limit ? `<div class="review-note">${esc(t('reviewFiltered'))}</div>` : '');
 }
 
 /* --- 店舗情報（詳細）テーブル --- */

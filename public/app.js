@@ -2165,6 +2165,7 @@ function openAdminModal() {
   document.getElementById('sClaudeApiKey').type = 'password';
   document.getElementById('sClaudeShow').checked = false;
   document.getElementById('sAiDailyLimit').value = state.settings.aiDailyLimit || 50;
+  renderPickSummary();
   document.getElementById('sGooglePlaceId').value = state.settings.googlePlaceId || '';
   document.getElementById('sGoogleApiKey').value = state.settings.googleApiKey || '';
   document.getElementById('sGoogleApiKey').type = 'password';
@@ -2400,6 +2401,7 @@ const WEEKDAY_CHARS = ['日', '月', '火', '水', '木', '金', '土'];
 /* 1つの操作を実行して結果文を返す */
 async function applyChatAction(a) {
   const fmtDone = (label, v) => `✅ ${label}: ${v} — ${t('chatUpdated')}`;
+  if (a.type === 'photo_list' || a.type === 'review_list' || a.type === 'photo_select' || a.type === 'review_filter') return applyPickAction(a);
   switch (a.type) {
     case 'set_field': {
       if (!(a.field in CHAT_FIELD_LABELS)) return t('chatUnknown');
@@ -2507,13 +2509,15 @@ async function runChatActions(actions) {
   for (const a of actions) out.push(await applyChatAction(a));
   save();
   renderAll();
-  return out.join('\n');
+  return out.filter(Boolean).join('\n');
 }
 
 /* ルールベースの解釈（テーブル設定・予約サイト最適化） → アクション配列 or null */
 function chatParseSiteCommands(text) {
   const lower = text.toLowerCase();
   const val = (s) => String(s || '').replace(/^[「『"]|[」』"]$/g, '').trim();
+  const pick = chatParsePickCommands(text);
+  if (pick) return pick;
   // Google マップから取り込み
   if (/google\s*マップ|googleマップ|グーグル/i.test(lower) && /(取り込|取込|取得|反映|同期)/.test(text) && !/(検索|探)/.test(text)) return [{ type: 'import_google' }];
   // Google マップで検索して設定
@@ -2578,6 +2582,7 @@ async function chatAiInterpret(text) {
   const sites = (state.sites || []).map((s) => `${s.name}:${s.enabled ? 'ON' : 'OFF'}`).join(', ');
   const courses = (state.courses || []).map((c) => c.name + (c.price ? ' ' + c.price : '')).join(', ');
   const extras = (state.settings.storeExtras || []).map((x) => `${x.label}=${x.value}`).join(', ');
+  const pickCtx = await pickContextForAi(text);
   const system = `あなたは飲食店の予約台帳の設定アシスタントです。ユーザーの日本語（またはベトナム語）の指示を、次のアクションの配列に変換して JSON だけを返してください。\n` +
     `アクション:\n` +
     `- {"type":"set_field","field":F,"value":文字列}  F は storeName/storeKana/storeGenre/storePhone/storeAddress/storeAccess/storeHours/storeBudget/storeBudgetLunch/storePayment/storeCatch/storeDescription/storeNote/googlePlaceId\n` +
@@ -2588,12 +2593,15 @@ async function chatAiInterpret(text) {
     `- {"type":"table_add","name":..,"seats":n,"min":n,"group":..} / {"type":"table_update","name":..,"seats"?:n,"min"?:n,"group"?:..,"newName"?:..} / {"type":"table_delete","name":..}\n` +
     `- {"type":"site_toggle","name":予約サイト名,"enabled":true|false}\n- {"type":"course_set","name":..,"price"?:..,"desc"?:..} / {"type":"course_delete","name":..}\n` +
     `- {"type":"extra_set","label":項目名,"value":内容} / {"type":"extra_delete","label":..}  店舗詳細（個室・駐車場など自由項目）\n` +
-    `現在の状態: 店名=${state.settings.storeName || ''} / テーブル: ${tables} / 予約サイト: ${sites} / コース: ${courses} / 店舗詳細: ${extras} / 定休日=${(state.settings.closedDays || []).map((d) => WEEKDAY_CHARS[d]).join('') || 'なし'} / 今日=${todayStr()}\n` +
+    `- {"type":"photo_list"} / {"type":"review_list"}  Google マップの写真／口コミを番号付きで一覧表示\n` +
+    `- {"type":"photo_select","use"?:[番号...(表示順)],"main"?:番号,"hide"?:[番号...],"unhide"?:[番号...],"reset"?:true}  予約サイトに出す写真の選定（番号は下の写真一覧の番号。画像が添付されていれば内容を見て選ぶ）\n` +
+    `- {"type":"review_filter","minRating"?:1-5,"sort"?:"newest"|"highest"|"lowest","limit"?:n,"keyword"?:文字列,"hide"?:[番号...],"unhide"?:[番号...],"reset"?:true}  予約サイトに出す口コミの絞り込み。低評価だけを隠す目的の指示には、Google の規約上できないと reply で説明し hide を出さない\n` +
+    `現在の状態: 店名=${state.settings.storeName || ''} / テーブル: ${tables} / 予約サイト: ${sites} / コース: ${courses} / 店舗詳細: ${extras} / 定休日=${(state.settings.closedDays || []).map((d) => WEEKDAY_CHARS[d]).join('') || 'なし'} / 今日=${todayStr()}${pickCtx.text}\n` +
     `該当する操作が無い、または予約の登録・変更（お客様の予約）に関する指示なら {"actions":[],"reply":"理由"} を返してください。文言の改善提案を求められたら、改善した文言で set_field を提案してください。出力は {"actions":[...],"reply":"短い日本語の説明"} のみ。`;
   const res = await fetch(CLAUDE_API_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'server-side-fallback-2026-07-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 1500, fallbacks: 'default', system, output_config: { effort: 'low' }, messages: [{ role: 'user', content: text }] }),
+    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 1500, fallbacks: 'default', system, output_config: { effort: 'low' }, messages: [{ role: 'user', content: pickCtx.images.some(Boolean) ? [...pickCtx.images.map((im, i) => im ? [{ type: 'text', text: `写真 ${i + 1}:` }, { type: 'image', source: { type: 'base64', media_type: im.media_type, data: im.data } }] : []).flat(), { type: 'text', text }] : text }] }),
   });
   if (!res.ok) { let msg = `HTTP ${res.status}`; try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (err) { /* ignore */ } throw new Error(msg); }
   const data = await res.json();
@@ -2603,6 +2611,254 @@ async function chatAiInterpret(text) {
   if (!m) throw new Error(t('aiNoJson'));
   const parsed = JSON.parse(m[0]);
   return { actions: Array.isArray(parsed.actions) ? parsed.actions : [], reply: String(parsed.reply || '') };
+}
+
+/* ---------- 予約サイトの写真・口コミの選定（チャットから指示） ----------
+ * Google マップの写真・口コミは内容を編集できないため、「どれを・どの順で表示するか」だけを保存する。
+ * photoPick  = { use: [写真ID(表示順)], hide: [写真ID] }   use が空なら全件（hide を除く）
+ * reviewPick = { minRating, sort('newest'|'highest'|'lowest'), limit, keyword, hide: [口コミID] } */
+const GMEDIA_KEY = 'yoyaku-gmedia-v1';
+const GMEDIA_TTL = 6 * 60 * 60 * 1000;
+let gMedia = null;   // { key, at, photos:[{id,url,author}], reviews:[{id,author,rating,text,when,time}] }
+function photoPick() { const p = state.settings.photoPick; return { use: (p && p.use) || [], hide: (p && p.hide) || [] }; }
+function reviewPick() { const p = state.settings.reviewPick || {}; return { minRating: p.minRating || null, sort: p.sort || null, limit: p.limit || null, keyword: p.keyword || '', hide: p.hide || [] }; }
+function pickIsEmpty(p) { return !p.minRating && !p.sort && !p.limit && !p.keyword && !(p.hide || []).length; }
+
+/* Google マップの写真・口コミ一覧を取得（6時間キャッシュ） */
+async function fetchGoogleMedia(force) {
+  const pid = String(state.settings.googlePlaceId || '').trim();
+  const key = String(state.settings.googleApiKey || '').trim();
+  if (!pid || !key) throw new Error(t('chatNeedGoogle'));
+  const lang = state.settings.lang || 'ja';
+  const ck = `${pid}|${lang}`;
+  if (!force && gMedia && gMedia.key === ck && Date.now() - gMedia.at < GMEDIA_TTL) return gMedia;
+  if (!force) {
+    try { const c = JSON.parse(localStorage.getItem(GMEDIA_KEY)); if (c && c.key === ck && Date.now() - c.at < GMEDIA_TTL) { gMedia = c; return c; } } catch (e) { /* ignore */ }
+  }
+  const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(pid)}?languageCode=${encodeURIComponent(lang)}`, {
+    headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'photos,reviews,rating,userRatingCount' },
+  });
+  if (!res.ok) { let msg = `HTTP ${res.status}`; try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (err) { /* ignore */ } throw new Error(msg); }
+  const data = await res.json();
+  gMedia = {
+    key: ck, at: Date.now(), rating: data.rating ?? null, count: data.userRatingCount ?? 0,
+    photos: (data.photos || []).slice(0, 10).map((p) => ({ id: p.name, url: `https://places.googleapis.com/v1/${p.name}/media?maxWidthPx=400&key=${encodeURIComponent(key)}`, author: p.authorAttributions?.[0]?.displayName || '' })),
+    reviews: (data.reviews || []).map((r) => ({ id: r.name || '', author: r.authorAttribution?.displayName || '', rating: r.rating || 0, text: r.text?.text || r.originalText?.text || '', when: r.relativePublishTimeDescription || '', time: r.publishTime || '' })),
+  };
+  try { localStorage.setItem(GMEDIA_KEY, JSON.stringify(gMedia)); } catch (e) { /* ignore */ }
+  return gMedia;
+}
+/* 予約サイトと同じ規則で表示対象を並べる（一覧表示・要約用） */
+function applyPhotoPick(list, pick) {
+  const hide = new Set(pick.hide || []);
+  const use = (pick.use || []).filter(Boolean);
+  if (use.length) {
+    const byId = new Map(list.map((p) => [p.id, p]));
+    const out = use.map((id) => byId.get(id)).filter((p) => p && !hide.has(p.id));
+    if (out.length) return out;
+  }
+  return list.filter((p) => !hide.has(p.id));
+}
+function applyReviewPick(list, pick) {
+  const hide = new Set(pick.hide || []);
+  let out = list.filter((r) => !hide.has(r.id));
+  if (pick.minRating) out = out.filter((r) => (r.rating || 0) >= pick.minRating);
+  if (pick.keyword) { const k = String(pick.keyword).toLowerCase(); out = out.filter((r) => String(r.text || '').toLowerCase().includes(k)); }
+  if (pick.sort === 'newest') out = [...out].sort((a, b) => String(b.time || '').localeCompare(String(a.time || '')));
+  else if (pick.sort === 'highest') out = [...out].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+  else if (pick.sort === 'lowest') out = [...out].sort((a, b) => (a.rating || 0) - (b.rating || 0));
+  if (pick.limit) out = out.slice(0, pick.limit);
+  return out;
+}
+function photoPickSummary(media) {
+  const p = photoPick();
+  if (!p.use.length && !p.hide.length) return t('pickNone');
+  const num = (id) => { const i = media ? media.photos.findIndex((x) => x.id === id) : -1; return i >= 0 ? `#${i + 1}` : '?'; };
+  const parts = [];
+  if (p.use.length) parts.push(t('pickPhotoUse').replace('{n}', p.use.length).replace('{list}', p.use.map(num).join(' → ')));
+  if (p.hide.length) parts.push(t('pickPhotoHide').replace('{n}', p.hide.length).replace('{list}', p.hide.map(num).join(', ')));
+  return parts.join(' / ');
+}
+function reviewPickSummary() {
+  const p = reviewPick();
+  if (pickIsEmpty(p)) return t('pickNone');
+  const parts = [];
+  if (p.minRating) parts.push(t('pickMinRating').replace('{n}', p.minRating));
+  if (p.sort) parts.push(t(p.sort === 'newest' ? 'pickSortNewest' : p.sort === 'highest' ? 'pickSortHighest' : 'pickSortLowest'));
+  if (p.keyword) parts.push(t('pickKeyword').replace('{k}', p.keyword));
+  if (p.limit) parts.push(t('pickLimit').replace('{n}', p.limit));
+  if (p.hide.length) parts.push(t('pickHiddenN').replace('{n}', p.hide.length));
+  return parts.join(' / ');
+}
+/* 管理者設定の「写真・口コミの選定」表示 */
+function renderPickSummary() {
+  const el = document.getElementById('pickSummary');
+  if (!el) return;
+  const cached = gMedia || (() => { try { return JSON.parse(localStorage.getItem(GMEDIA_KEY)); } catch (e) { return null; } })();
+  el.innerHTML = `<div class="pick-row"><span class="pick-k">${esc(t('pickPhotoHead'))}</span><span class="pick-v">${esc(photoPickSummary(cached))}</span>` +
+    `<button type="button" class="btn ghost small" id="btnPickPhotoReset" ${photoPick().use.length || photoPick().hide.length ? '' : 'disabled'}>${esc(t('pickReset'))}</button></div>` +
+    `<div class="pick-row"><span class="pick-k">${esc(t('pickReviewHead'))}</span><span class="pick-v">${esc(reviewPickSummary())}</span>` +
+    `<button type="button" class="btn ghost small" id="btnPickReviewReset" ${pickIsEmpty(reviewPick()) ? 'disabled' : ''}>${esc(t('pickReset'))}</button></div>` +
+    `<p class="combo-note">${esc(t('pickChatHint'))}</p>`;
+  el.querySelector('#btnPickPhotoReset').addEventListener('click', () => { state.settings.photoPick = null; save(); renderPickSummary(); });
+  el.querySelector('#btnPickReviewReset').addEventListener('click', () => { state.settings.reviewPick = null; save(); renderPickSummary(); });
+}
+/* チャット: 写真一覧（番号付きサムネイル） */
+function chatPhotoListNode(media) {
+  const p = photoPick();
+  const shown = applyPhotoPick(media.photos, p);
+  const order = new Map(shown.map((x, i) => [x.id, i + 1]));
+  const wrap = document.createElement('div');
+  wrap.className = 'pick-card';
+  const head = document.createElement('div');
+  head.className = 'pick-head';
+  head.textContent = t('chatPhotoList');
+  wrap.appendChild(head);
+  if (!media.photos.length) { const e = document.createElement('div'); e.textContent = t('chatPhotoNone'); wrap.appendChild(e); return wrap; }
+  const grid = document.createElement('div');
+  grid.className = 'pick-grid';
+  media.photos.forEach((ph, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'pick-item' + (order.has(ph.id) ? '' : ' off');
+    const img = document.createElement('img');
+    img.src = ph.url; img.alt = ''; img.loading = 'lazy';
+    const n = document.createElement('span'); n.className = 'pick-num'; n.textContent = String(i + 1);
+    const st = document.createElement('span'); st.className = 'pick-state';
+    st.textContent = order.has(ph.id) ? (order.get(ph.id) === 1 ? t('chatPickMain') : `${t('chatPickInUse')} ${order.get(ph.id)}`) : t('chatPickHidden');
+    cell.appendChild(img); cell.appendChild(n); cell.appendChild(st);
+    grid.appendChild(cell);
+  });
+  wrap.appendChild(grid);
+  const foot = document.createElement('div');
+  foot.className = 'pick-foot';
+  foot.textContent = `${t('pickPhotoHead')}: ${photoPickSummary(media)}\n${t('chatPickExamplesPhoto')}`;
+  wrap.appendChild(foot);
+  return wrap;
+}
+/* チャット: 口コミ一覧（番号付き） */
+function chatReviewListNode(media) {
+  const p = reviewPick();
+  const shown = new Set(applyReviewPick(media.reviews, p).map((r) => r.id));
+  const wrap = document.createElement('div');
+  wrap.className = 'pick-card';
+  const head = document.createElement('div');
+  head.className = 'pick-head';
+  head.textContent = `${t('chatReviewList')}${media.rating != null ? `　★${media.rating}（${media.count}）` : ''}`;
+  wrap.appendChild(head);
+  if (!media.reviews.length) { const e = document.createElement('div'); e.textContent = t('chatReviewNone'); wrap.appendChild(e); return wrap; }
+  media.reviews.forEach((rv, i) => {
+    const row = document.createElement('div');
+    row.className = 'pick-review' + (shown.has(rv.id) ? '' : ' off');
+    const top = document.createElement('div');
+    top.className = 'pick-review-top';
+    top.textContent = `${i + 1}. ${'★'.repeat(rv.rating || 0)}${'☆'.repeat(Math.max(0, 5 - (rv.rating || 0)))}  ${rv.author || ''}  ${rv.when || ''}${shown.has(rv.id) ? '' : `  [${t('chatPickHidden')}]`}`;
+    const body = document.createElement('div');
+    body.className = 'pick-review-text';
+    body.textContent = lim(rv.text || '', 140) + ((rv.text || '').length > 140 ? '…' : '');
+    row.appendChild(top); row.appendChild(body);
+    wrap.appendChild(row);
+  });
+  const foot = document.createElement('div');
+  foot.className = 'pick-foot';
+  foot.textContent = `${t('pickReviewHead')}: ${reviewPickSummary()}\n${t('chatPickExamplesReview')}\n${t('reviewPolicyNote')}`;
+  wrap.appendChild(foot);
+  return wrap;
+}
+/* チャットのルール解釈（写真・口コミの選定）。該当しなければ null */
+function chatParsePickCommands(text) {
+  const isPhoto = /写真|フォト|ảnh/i.test(text);
+  const isReview = /口コミ|レビュー|評価|クチコミ|đánh giá/i.test(text);
+  if (!isPhoto && !isReview) return null;
+  if (/(一覧|リスト|確認|候補|見せて|danh sách)/.test(text) && !/(予約サイト|サイトに|サイトで)/.test(text) && !/\d/.test(text)) {
+    return [{ type: isPhoto ? 'photo_list' : 'review_list' }];
+  }
+  const nums = (text.replace(/星\s*\d|★\s*\d|\d\s*つ星|\d\s*件|\d\s*枚目?/g, ' ').match(/\d+/g) || []).map(Number).filter((n) => n >= 1 && n <= 50);
+  if (/(解除|リセット|元に戻|全部使|すべて使|全て使|全部表示|すべて表示|全て表示)/.test(text)) {
+    if (isPhoto) return [{ type: 'photo_select', reset: true }];
+    if (isReview) return [{ type: 'review_filter', reset: true }];
+  }
+  if (isPhoto) {
+    if (nums.length && /(メイン|先頭|トップ|最初|一番目|1番目|表紙)/.test(text)) return [{ type: 'photo_select', main: nums[0] }];
+    if (nums.length && /(外|除外|非表示|使わない|消|隠)/.test(text)) return [{ type: 'photo_select', hide: nums }];
+    if (nums.length && /(戻|表示|使)/.test(text) && /(戻)/.test(text)) return [{ type: 'photo_select', unhide: nums }];
+    if (nums.length && /(使|選|並|順|表示|だけ|のみ)/.test(text)) return [{ type: 'photo_select', use: nums }];
+    if (nums.length) return [{ type: 'photo_select', use: nums }];
+    return null;
+  }
+  // 口コミ
+  const f = {};
+  let m = text.match(/(?:星|★)\s*(\d)\s*(?:以上|つ以上)|(\d)\s*つ星以上/);
+  if (m) f.minRating = Number(m[1] || m[2]);
+  if (/(新しい順|最新順|新着順|新しいもの|日付順)/.test(text)) f.sort = 'newest';
+  else if (/(評価の高い順|高い順|評価順|星の多い順)/.test(text)) f.sort = 'highest';
+  else if (/(低い順|星の少ない順)/.test(text)) f.sort = 'lowest';
+  m = text.match(/(\d+)\s*件\s*(?:まで|だけ|に|のみ|表示|で)/);
+  if (m) f.limit = Number(m[1]);
+  m = text.match(/[「『"](.+?)[」』"]\s*(?:を|が)?(?:含|入っ|ある)/);
+  if (m) f.keyword = m[1];
+  if (nums.length && /(外|除外|非表示|使わない|消|隠)/.test(text) && !Object.keys(f).length) return [{ type: 'review_filter', hide: nums }];
+  if (nums.length && /(戻|再表示)/.test(text) && !Object.keys(f).length) return [{ type: 'review_filter', unhide: nums }];
+  if (Object.keys(f).length) return [{ type: 'review_filter', ...f }];
+  return null;
+}
+/* 番号（1始まり）→ ID。範囲外は無視 */
+function idsByNums(list, nums) { return (nums || []).map((n) => list[Number(n) - 1]).filter(Boolean).map((x) => x.id); }
+async function applyPickAction(a) {
+  let media;
+  try { media = await fetchGoogleMedia(); } catch (e) { return `${t('chatNoMedia')} ${e.message || ''}`.trim(); }
+  if (a.type === 'photo_list') { chatAppendNode('bot', chatPhotoListNode(media)); return ''; }
+  if (a.type === 'review_list') { chatAppendNode('bot', chatReviewListNode(media)); return ''; }
+  if (a.type === 'photo_select') {
+    if (a.reset) { state.settings.photoPick = null; return t('chatPickReset'); }
+    const p = photoPick();
+    const use = [...p.use]; let hide = [...p.hide];
+    const all = media.photos.map((x) => x.id);
+    if (a.use && a.use.length) { const ids = idsByNums(media.photos, a.use); if (!ids.length) return t('chatPickBadNum'); use.length = 0; use.push(...ids); hide = hide.filter((id) => !ids.includes(id)); }
+    if (a.main != null) { const ids = idsByNums(media.photos, [a.main]); if (!ids.length) return t('chatPickBadNum'); const base = [...(use.length ? use : all.filter((id) => !hide.includes(id)))]; use.length = 0; use.push(ids[0], ...base.filter((id) => id !== ids[0])); hide = hide.filter((id) => id !== ids[0]); }
+    if (a.hide && a.hide.length) { const ids = idsByNums(media.photos, a.hide); if (!ids.length) return t('chatPickBadNum'); ids.forEach((id) => { if (!hide.includes(id)) hide.push(id); }); for (let i = use.length - 1; i >= 0; i--) if (ids.includes(use[i])) use.splice(i, 1); }
+    if (a.unhide && a.unhide.length) { const ids = idsByNums(media.photos, a.unhide); hide = hide.filter((id) => !ids.includes(id)); }
+    if (all.length && hide.length >= all.length) return t('chatPickAllHidden');
+    state.settings.photoPick = (use.length || hide.length) ? { use, hide } : null;
+    return t('chatPhotoSelected').replace('{v}', photoPickSummary(media));
+  }
+  if (a.type === 'review_filter') {
+    if (a.reset) { state.settings.reviewPick = null; return t('chatPickReset'); }
+    const p = reviewPick();
+    if (a.minRating != null) p.minRating = Math.min(5, Math.max(1, Number(a.minRating))) || null;
+    if (a.sort != null) p.sort = ['newest', 'highest', 'lowest'].includes(a.sort) ? a.sort : null;
+    if (a.limit != null) p.limit = Math.max(0, Number(a.limit)) || null;
+    if (a.keyword != null) p.keyword = lim(String(a.keyword || '').trim(), 40);
+    if (a.hide && a.hide.length) { const ids = idsByNums(media.reviews, a.hide); if (!ids.length) return t('chatPickBadNum'); ids.forEach((id) => { if (!p.hide.includes(id)) p.hide.push(id); }); }
+    if (a.unhide && a.unhide.length) { const ids = idsByNums(media.reviews, a.unhide); p.hide = p.hide.filter((id) => !ids.includes(id)); }
+    state.settings.reviewPick = pickIsEmpty(p) ? null : p;
+    const n = applyReviewPick(media.reviews, reviewPick()).length;
+    return `${t('chatReviewFiltered').replace('{v}', reviewPickSummary())}（${n}/${media.reviews.length}）\n${t('reviewPolicyNote')}`;
+  }
+  return t('chatUnknown');
+}
+/* Claude に渡す現在の写真・口コミの一覧（番号付き）と、写真の画像（写真に関する指示のとき） */
+async function pickContextForAi(text) {
+  const out = { text: '', images: [] };
+  if (!/写真|フォト|口コミ|レビュー|評価|クチコミ|ảnh|đánh giá/i.test(text)) return out;
+  let media;
+  try { media = await fetchGoogleMedia(); } catch (e) { return out; }
+  const photos = media.photos.map((p, i) => `${i + 1}${p.author ? `(${p.author})` : ''}`).join(', ');
+  const reviews = media.reviews.map((r, i) => `${i + 1}: ★${r.rating} ${r.when} ${lim(r.text.replace(/\s+/g, ' '), 80)}`).join('\n');
+  out.text = `\n写真（番号順）: ${photos || 'なし'} / 現在の写真の選定: ${photoPickSummary(media)}\n口コミ（番号順）:\n${reviews || 'なし'}\n現在の口コミの絞り込み: ${reviewPickSummary()}`;
+  if (/写真|フォト|ảnh/i.test(text) && media.photos.length) {
+    const imgs = await Promise.all(media.photos.map(async (p) => {
+      try {
+        const res = await fetch(p.url);
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        const dataUrl = await new Promise((resolve, reject) => { const fr = new FileReader(); fr.onload = () => resolve(fr.result); fr.onerror = reject; fr.readAsDataURL(blob); });
+        const mm = String(dataUrl).match(/^data:([^;]+);base64,(.+)$/);
+        return mm ? { media_type: mm[1], data: mm[2] } : null;
+      } catch (e) { return null; }
+    }));
+    out.images = imgs;
+  }
+  return out;
 }
 
 /* ---------- マーケティング（流入分析） ----------
@@ -3368,7 +3624,7 @@ async function chatSubmit() {
   } catch (e) {
     reply = t('chatUnknown') + '\n' + t('chatExamples');
   }
-  chatAppend('bot', reply);
+  if (reply) chatAppend('bot', reply);
 }
 
 /* ---------- 月間カレンダー（日別の組数・人数、定休日、未確認ネット予約） ---------- */
