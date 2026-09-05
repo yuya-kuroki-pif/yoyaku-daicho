@@ -41,7 +41,7 @@ const T = {
     reserveCta: 'ネット予約する', netReserve: 'ネット予約', call: '電話',
     aboutHead: 'お店について', infoHead: '店舗情報', mapHead: '地図', courseHead: 'コース', photoHead: '写真', reviewHead: '口コミ',
     latestReviews: '最新の口コミ', moreReviews: 'すべての口コミを見る', morePhotos: '写真をもっと見る', moreCourses: 'コース一覧を見る', moreInfo: '店舗情報を見る',
-    ratingLabel: 'Google 評価', reviewsCount(n) { return `${n}件の口コミ`; }, ratingNone: '評価なし',
+    ratingLabel: 'Google 評価', googleRatingLabel: 'Google マップの評価', reviewsCount(n) { return `${n}件の口コミ`; }, ratingNone: '評価なし',
     viewOnGoogle: 'Googleマップで見る', reviewNoteSetup: '口コミ・評価は Google マップから取得して表示します。（店舗側で Google の Place ID と API キーを設定すると表示されます）',
     reviewLoading: '口コミを読み込み中…', reviewError: '口コミを取得できませんでした。しばらくしてからもう一度お試しください。', reviewNone: 'まだ口コミがありません', reviewFiltered: '一部の口コミを表示しています。すべての口コミは Google マップでご覧いただけます。',
     poweredGoogle: '口コミ・評価・一部の写真は Google 提供', readMore: '続きを読む', photoBy: '写真:',
@@ -104,7 +104,7 @@ const T = {
     reserveCta: 'Đặt bàn trực tuyến', netReserve: 'Đặt bàn trực tuyến', call: 'Gọi',
     aboutHead: 'Về cửa hàng', infoHead: 'Thông tin cửa hàng', mapHead: 'Bản đồ', courseHead: 'Course', photoHead: 'Ảnh', reviewHead: 'Đánh giá',
     latestReviews: 'Đánh giá mới nhất', moreReviews: 'Xem tất cả đánh giá', morePhotos: 'Xem thêm ảnh', moreCourses: 'Xem danh sách course', moreInfo: 'Xem thông tin cửa hàng',
-    ratingLabel: 'Điểm Google', reviewsCount(n) { return `${n} đánh giá`; }, ratingNone: 'Chưa có điểm',
+    ratingLabel: 'Điểm Google', googleRatingLabel: 'Điểm đánh giá trên Google Maps', reviewsCount(n) { return `${n} đánh giá`; }, ratingNone: 'Chưa có điểm',
     viewOnGoogle: 'Xem trên Google Maps', reviewNoteSetup: 'Đánh giá được lấy từ Google Maps. (Cửa hàng cần cài đặt Place ID và API key của Google)',
     reviewLoading: 'Đang tải đánh giá…', reviewError: 'Không tải được đánh giá. Vui lòng thử lại sau.', reviewNone: 'Chưa có đánh giá', reviewFiltered: 'Chỉ hiển thị một phần đánh giá. Xem toàn bộ trên Google Maps.',
     poweredGoogle: 'Đánh giá, điểm và một số ảnh do Google cung cấp', readMore: 'Xem thêm', photoBy: 'Ảnh:',
@@ -477,8 +477,9 @@ function renderHeader(st) {
 
   const r = document.getElementById('hRating');
   if (google.status === 'ok' && google.data && google.data.rating != null && reviewsEnabled(st)) {
-    r.innerHTML = `<span class="score">${google.data.rating.toFixed(1)}</span>${starsHtml(google.data.rating)}` +
-      `<a href="${esc(googleMapsLink(st))}" target="_blank" rel="noopener"><span class="rc">${esc(t('tabReview'))}</span> ${esc(tr().reviewsCount(google.data.count))}</a>`;
+    r.innerHTML = `<div class="g-rating"><span class="g-label">${esc(t('googleRatingLabel'))}</span>` +
+      `<span class="g-main"><span class="score">${google.data.rating.toFixed(1)}</span>${starsHtml(google.data.rating)}` +
+      `<a href="${esc(googleMapsLink(st))}" target="_blank" rel="noopener"><span class="rc">${esc(tr().reviewsCount(google.data.count))}</span> ›</a></span></div>`;
   } else if (google.status === 'loading') {
     r.innerHTML = `<span>${esc(t('reviewLoading'))}</span>`;
   } else {

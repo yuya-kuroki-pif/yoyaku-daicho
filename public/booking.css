@@ -42,6 +42,15 @@ a { color: var(--accent-dark); }
 .sh-rating .score { font-size: 22px; font-weight: 900; color: var(--accent); line-height: 1; }
 .sh-rating a { text-decoration: none; font-weight: 700; }
 .sh-rating .rc { color: var(--text); }
+.g-rating { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; background: var(--accent-soft); border: 1px solid #ffd3a6; border-radius: 12px; padding: 8px 14px; margin: 2px 0 4px; }
+.g-label { font-size: 12.5px; font-weight: 800; color: var(--accent-dark); letter-spacing: .2px; display: inline-flex; align-items: center; gap: 4px; }
+.g-label::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.g-main { display: inline-flex; align-items: center; gap: 8px; }
+.g-main .score { font-size: 28px; }
+.g-main .stars { font-size: 17px; }
+.g-main a { color: var(--text); font-size: 13px; }
+.g-main a:hover { color: var(--accent-dark); }
+@media (max-width: 600px) { .g-rating { width: 100%; padding: 8px 12px; } .g-main .score { font-size: 24px; } .g-main .stars { font-size: 15px; } }
 .sh-meta { font-size: 13px; color: var(--text); display: flex; flex-wrap: wrap; gap: 2px 12px; padding: 2px 0; }
 .sh-meta .k { color: var(--muted); font-size: 11.5px; margin-right: 3px; }
 .sh-badges { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 10px; }
