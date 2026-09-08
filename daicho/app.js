@@ -1320,8 +1320,9 @@ let siteModalColor = SITE_COLORS[0];
 
 /* サイトごとの予約URL（経路パラメータ付き） */
 function bookingUrl(siteId) {
-  // 台帳と同じディレクトリの booking.html（GitHub Pages のサブパスや file: でも動くよう相対で組み立てる）
-  const base = location.href.replace(/[?#].*$/, '').replace(/[^/]*$/, '') + 'booking.html';
+  // config.js の bookingUrl（予約サイトを別のURL・リポジトリで公開する場合）。未設定なら隣の booking/ を相対で指す
+  const cfg = window.APP_CONFIG || {};
+  const base = String(cfg.bookingUrl || '').trim() || new URL('../booking/index.html', location.href).href;
   const q = `store=${encodeURIComponent(registry.currentId)}` + (siteId ? `&site=${encodeURIComponent(siteId)}` : '');
   return `${base}?${q}`;
 }

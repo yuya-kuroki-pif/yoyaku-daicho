@@ -7,4 +7,7 @@
 window.APP_CONFIG = {
   supabaseUrl: '',
   supabaseAnonKey: '',
+  /* 予約サイトの URL（例: 'https://example.github.io/yoyaku-site/'）。空なら隣の booking/ を使います。
+   * 予約サイトを別ドメインで公開する場合は、台帳・予約サイトの両方で Supabase を設定してください（端末内保存はドメインをまたいで共有できません）。 */
+  bookingUrl: '',
 };
