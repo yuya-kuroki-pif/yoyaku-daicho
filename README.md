@@ -106,6 +106,18 @@ python -m http.server 8210
 
 仕組み: 店舗ごとの設定は `stores` テーブルの JSON、予約は `reservations` テーブルに1件1行で保存し、変更分だけを書き込みます。他端末や予約サイトからの変更はリアルタイムで台帳に反映されます。予約サイト（お客様）はテーブルに直接アクセスできず、`booking_*` 関数経由で空席計算・予約作成・予約番号での確認／取消だけができます（氏名・電話番号は取得不可）。予約作成時はサーバー側でも受付状態と同じ卓の重複を検証します。Claude API キーはクラウドへ送らず端末内に保存します。
 
+### 一括セットアップ（スクリプト）
+
+手順 1〜4 は [`supabase/setup.js`](supabase/setup.js) で自動化できます（Node.js 18 以上、追加パッケージ不要）。Supabase の **Account → Access Tokens** で発行したトークンを環境変数に入れて実行します。
+
+```powershell
+$env:SUPABASE_ACCESS_TOKEN = 'sbp_xxxxxxxx'
+node supabase/setup.js --name yoyaku-daicho --region ap-southeast-1 --staff-email staff@example.com --staff-password 'パスワード'
+# 既存プロジェクトにスキーマだけ適用する場合: node supabase/setup.js --ref <プロジェクトの ref>
+```
+
+プロジェクトの作成 → 起動待ち → `schema.sql` の適用 → anon キーの取得と `daicho/config.js`・`booking/config.js` への書き込み → スタッフユーザーの作成 → 予約サイト向け関数の疎通確認まで行います。表示される DB パスワードは控えてください。実行後に両方の `config.js` をコミット・公開すると、台帳にログイン画面が表示されます。
+
 ## セキュリティ上の配慮
 
 - 画面に表示する文字列はすべてエスケープし、外部（Google マップ・Claude）から受け取った URL は http(s) 以外のスキームを捨てます。
