@@ -54,6 +54,14 @@ async function main() {
     const org = args.org ? orgs.find((o) => o.id === args.org || o.name === args.org) : orgs[0];
     if (!org) throw new Error(`組織が見つかりません: ${args.org}`);
     const name = args.name || 'yoyaku-daicho';
+    // 同名のプロジェクトが既にあればそれを使う（二重作成を防ぐ）
+    const existing = (await mgmt('GET', '/projects')).find((p) => p.name === name && p.organization_id === org.id);
+    if (existing) { ref = existing.id; log(`既存のプロジェクトを使います: ${name}（ref=${ref}）`); }
+  }
+  if (!ref) {
+    const orgs = await mgmt('GET', '/organizations');
+    const org = args.org ? orgs.find((o) => o.id === args.org || o.name === args.org) : orgs[0];
+    const name = args.name || 'yoyaku-daicho';
     const region = args.region || 'ap-southeast-1';   // シンガポール（ハノイ・東京の両方から近い）
     dbPass = crypto.randomBytes(18).toString('base64url');
     log(`プロジェクトを作成: ${name}（組織: ${org.name} / リージョン: ${region}）`);
