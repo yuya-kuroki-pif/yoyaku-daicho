@@ -30,6 +30,8 @@ jobs:
         with:
           workload_identity_provider: 'projects/317034513457/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
           service_account: 'github-action-1290050008@yoyaku-daicho-704a0.iam.gserviceaccount.com'
+          token_format: 'access_token'
+          access_token_scopes: 'https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/firebase'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,4 +42,4 @@ jobs:
         run: npm install -g firebase-tools
 
       - name: Deploy to Firebase Hosting
-        run: firebase deploy --only hosting --project yoyaku-daicho-704a0
+        run: firebase deploy --only hosting --project yoyaku-daicho-704a0 --non-interactive --debug 2>&1 | grep -v -i "authorization: Bearer" | tail -80
