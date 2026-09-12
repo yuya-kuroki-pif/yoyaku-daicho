@@ -5,9 +5,14 @@
   "targets": {
     "yoyaku-daicho-704a0": {
       "hosting": {
-        "daicho": ["yoyaku-daicho-704a0"],
-        "booking": ["robata-naru-hanoi-booking"]
+        "daicho": [
+          "yoyaku-daicho-704a0"
+        ],
+        "booking": [
+          "robata-naru-hanoi-booking"
+        ]
       }
     }
-  }
+  },
+  "etags": {}
 }

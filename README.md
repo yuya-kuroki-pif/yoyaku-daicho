@@ -75,7 +75,7 @@ python -m http.server 8210
 |---|---|---|
 | `daicho/` | 予約台帳（スタッフ用）。`index.html` / `style.css` / `app.js` / `i18n.js` / `google-place.js` / `store.js` / `config.js` / `vendor/supabase.js` | Firebase: `https://yoyaku-daicho-704a0.web.app/`（GitHub Pages: `…/yoyaku-daicho/daicho/`） |
 | `booking/` | 予約サイト（お客様用）。`index.html` / `booking.css` / `booking.js` / `common.js` / `google-place.js` / `store.js` / `config.js` / `vendor/supabase.js` | Firebase: `https://robata-naru-hanoi-booking.web.app/?store=〇〇&site=〇〇`（GitHub Pages: `…/yoyaku-daicho/booking/`） |
-| `public/` | 旧URL用の転送ページのみ（`public/index.html` → `daicho/`、`public/booking.html` → `booking/`。タブレットのブックマークや配布済みの予約URLはそのまま使えます） | |
+| `public/` | 旧URL（GitHub Pages）用の転送ページのみ（`public/index.html` → Firebase の台帳、`public/booking.html` → Firebase の予約サイト。クエリを引き継ぐので、タブレットのブックマークや配布済みの予約URLはそのまま使えます） | |
 | `supabase/` | データベース定義（`schema.sql`）。台帳・予約サイト共通 | |
 
 - `google-place.js`・`store.js`・`config.js`・`vendor/supabase.js` は両方に同じ内容を置いています（リポジトリを分けたあとは各リポジトリで管理）。
