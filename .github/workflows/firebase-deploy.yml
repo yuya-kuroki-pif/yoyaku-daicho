@@ -42,4 +42,6 @@ jobs:
         run: npm install -g firebase-tools
 
       - name: Deploy to Firebase Hosting
-        run: firebase deploy --only hosting --project yoyaku-daicho-704a0 --non-interactive --debug 2>&1 | grep -v -i "authorization: Bearer" | tail -80
+        run: |
+          set -o pipefail
+          firebase deploy --only hosting --project yoyaku-daicho-704a0 --non-interactive --debug 2>&1 | grep -v -i "authorization" | tail -100
