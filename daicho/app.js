@@ -3099,7 +3099,8 @@ function exportMarketingCsv() {
 function renderBackupNote() {
   const bn = document.getElementById('backupNote');
   const days = registry.lastBackupAt ? (Date.now() - registry.lastBackupAt) / 86400000 : Infinity;
-  const show = state.reservations.length > 0 && days > 7 && registry.backupDismissed !== todayStr();
+  // クラウド保存中はデータが端末外に保存されているため催促しない
+  const show = !cloudMode && state.reservations.length > 0 && days > 7 && registry.backupDismissed !== todayStr();
   bn.classList.toggle('hidden', !show);
   if (show) {
     document.getElementById('backupNoteText').textContent = registry.lastBackupAt
