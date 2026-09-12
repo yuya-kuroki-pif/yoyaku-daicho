@@ -71,15 +71,16 @@ python -m http.server 8210
 
 予約台帳（`daicho/`）と予約サイト（`booking/`）は、それぞれ単独で配信できる構成です（将来は別々の URL・リポジトリに分けられます）。
 
-| フォルダ | 内容 | 公開URL（GitHub Pages） |
+| フォルダ | 内容 | 公開URL |
 |---|---|---|
-| `daicho/` | 予約台帳（スタッフ用）。`index.html` / `style.css` / `app.js` / `i18n.js` / `google-place.js` / `store.js` / `config.js` / `vendor/supabase.js` | `…/yoyaku-daicho/daicho/` |
-| `booking/` | 予約サイト（お客様用）。`index.html` / `booking.css` / `booking.js` / `common.js` / `google-place.js` / `store.js` / `config.js` / `vendor/supabase.js` | `…/yoyaku-daicho/booking/?store=〇〇&site=〇〇` |
+| `daicho/` | 予約台帳（スタッフ用）。`index.html` / `style.css` / `app.js` / `i18n.js` / `google-place.js` / `store.js` / `config.js` / `vendor/supabase.js` | Firebase: `https://yoyaku-daicho-704a0.web.app/`（GitHub Pages: `…/yoyaku-daicho/daicho/`） |
+| `booking/` | 予約サイト（お客様用）。`index.html` / `booking.css` / `booking.js` / `common.js` / `google-place.js` / `store.js` / `config.js` / `vendor/supabase.js` | Firebase: `https://robata-naru-hanoi-booking.web.app/?store=〇〇&site=〇〇`（GitHub Pages: `…/yoyaku-daicho/booking/`） |
 | `public/` | 旧URL用の転送ページのみ（`public/index.html` → `daicho/`、`public/booking.html` → `booking/`。タブレットのブックマークや配布済みの予約URLはそのまま使えます） | |
 | `supabase/` | データベース定義（`schema.sql`）。台帳・予約サイト共通 | |
 
 - `google-place.js`・`store.js`・`config.js`・`vendor/supabase.js` は両方に同じ内容を置いています（リポジトリを分けたあとは各リポジトリで管理）。
-- 台帳が発行する予約URLは、`daicho/config.js` の `bookingUrl` が空なら隣の `booking/` を指します。予約サイトを別URLで公開したら `bookingUrl` にそのURLを設定してください。
+- **Firebase Hosting（本番URL）**: 1つのリポジトリから2サイトに配信します（`firebase.json` のマルチサイト設定、`.firebaserc` の target: `daicho` → yoyaku-daicho-704a0、`booking` → robata-naru-hanoi-booking）。`main` または `feature/updates` への push（daicho/・booking/・firebase 設定の変更時）で GitHub Actions が `firebase deploy --only hosting` を実行します。手動の場合は `firebase deploy --only hosting`（両サイト）または `--only hosting:booking`。
+- 台帳が発行する予約URLは、`daicho/config.js` の `bookingUrl`（現在は Firebase の予約サイト URL）を使い、空なら隣の `booking/` を指します。予約サイトを別URLで公開したら `bookingUrl` にそのURLを設定してください。
 - **別ドメインで公開する場合の注意**: 端末内保存（localStorage）はドメインをまたいで共有できないため、台帳と予約サイトを別ドメインにする場合は両方で Supabase（クラウド保存）を設定する必要があります。同じドメイン（同じ GitHub Pages）にある間は、従来どおり端末内保存でも動作します。
 
 ### 各ファイルの役割

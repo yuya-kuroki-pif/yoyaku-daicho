@@ -9,5 +9,5 @@ window.APP_CONFIG = {
   supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsemx0a2xmY2x6YWtjbXBjdGdhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NjY3NzEsImV4cCI6MjEwNDQ0Mjc3MX0.t6tABzs2KBuLOHv5NquOqkCOMLUaCcWhjFMU3Ads6S0',
   /* 予約サイトの URL（例: 'https://example.github.io/yoyaku-site/'）。空なら隣の booking/ を使います。
    * 予約サイトを別ドメインで公開する場合は、台帳・予約サイトの両方で Supabase を設定してください（端末内保存はドメインをまたいで共有できません）。 */
-  bookingUrl: '',
+  bookingUrl: 'https://robata-naru-hanoi-booking.web.app/',
 };

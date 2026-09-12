@@ -1,10 +1,16 @@
 {
-  "hosting": {
-    "public": "daicho",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ]
-  }
+  "hosting": [
+    {
+      "target": "daicho",
+      "public": "daicho",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "headers": [{ "source": "**/*.@(js|css|html)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=300" }] }]
+    },
+    {
+      "target": "booking",
+      "public": "booking",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "headers": [{ "source": "**/*.@(js|css|html)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=300" }] }]
+    }
+  ]
 }

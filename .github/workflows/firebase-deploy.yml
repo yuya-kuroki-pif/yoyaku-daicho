@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+      - feature/updates
+    paths:
+      - "daicho/**"
+      - "booking/**"
+      - "firebase.json"
+      - ".firebaserc"
+      - ".github/workflows/firebase-deploy.yml"
   workflow_dispatch:
 
 permissions:
