@@ -8,8 +8,9 @@
  *   5. 予約サイト向け関数（booking_store）が匿名で呼べるか確認
  *
  * 使い方（PowerShell）:
- *   $env:SUPABASE_ACCESS_TOKEN = 'sbp_xxxxxxxx'     # Supabase → Account → Access Tokens で発行
+ *   $env:SUPABASE_ACCESS_TOKEN = 'sbp_xxxxxxxx'     # Supabase → Account → Access Tokens で発行（--token-file <ファイル> でも可）
  *   node supabase/setup.js --name yoyaku-daicho --region ap-southeast-1 --staff-email staff@example.com --staff-password 'xxxxxxxx'
+ *   （--staff-password auto でパスワードを自動生成して表示）
  *   既存プロジェクトに適用するだけ:
  *   node supabase/setup.js --ref abcdefghijklmnop --staff-email ... --staff-password ...
  *
@@ -22,7 +23,7 @@ const crypto = require('crypto');
 const API = 'https://api.supabase.com/v1';
 const ROOT = path.resolve(__dirname, '..');
 const args = parseArgs(process.argv.slice(2));
-const TOKEN = args.token || process.env.SUPABASE_ACCESS_TOKEN || '';
+const TOKEN = (args.token || (args['token-file'] ? fs.readFileSync(args['token-file'], 'utf8').trim() : '') || process.env.SUPABASE_ACCESS_TOKEN || '').trim();
 
 function parseArgs(list) {
   const o = {};
@@ -103,6 +104,7 @@ async function main() {
 
   // ---- 4. スタッフユーザー ----
   if (args['staff-email'] && args['staff-password']) {
+    if (args['staff-password'] === 'auto') { args['staff-password'] = crypto.randomBytes(9).toString('base64url') + '!'; console.log(`   スタッフ用パスワード（控えてください）: ${args['staff-password']}`); }
     if (!service) throw new Error('service_role キーを取得できませんでした。ダッシュボードの Authentication → Users から手動で作成してください。');
     const res = await fetch(`${url}/auth/v1/admin/users`, {
       method: 'POST',

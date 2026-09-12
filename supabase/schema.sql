@@ -11,7 +11,6 @@
 --                  空席計算・予約作成・予約番号での確認／取消ができる（氏名・電話番号は読めない）
 -- =====================================================================
 
-create extension if not exists pgcrypto;
 
 -- ---------- テーブル ----------
 create table if not exists public.stores (
@@ -39,7 +38,7 @@ create index if not exists reservations_lookup on public.reservations (store_id,
 
 -- updated_at 自動更新
 create or replace function public.touch_updated_at() returns trigger
-language plpgsql as $$ begin new.updated_at = now(); return new; end $$;
+language plpgsql set search_path = public as $$ begin new.updated_at = now(); return new; end $$;
 drop trigger if exists stores_touch on public.stores;
 create trigger stores_touch before update on public.stores for each row execute function public.touch_updated_at();
 drop trigger if exists reservations_touch on public.reservations;
@@ -122,6 +121,7 @@ declare
   v_phone   text;
   v_now     text;
   v_res     jsonb;
+  v_rnd     text;
   i         integer;
 begin
   select * into v_store from public.stores where id = p_store for update;
@@ -156,8 +156,10 @@ begin
   ) then raise exception 'taken'; end if;
 
   v_id := 'r' || replace(gen_random_uuid()::text, '-', '');
+  -- 予約番号: gen_random_uuid() の乱数バイトから 6 文字（pgcrypto の関数に依存しない。Supabase では拡張が extensions スキーマにあり search_path から見えないため）
+  v_rnd := replace(gen_random_uuid()::text, '-', '');
   for i in 1..6 loop
-    v_code := v_code || substr('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', (get_byte(gen_random_bytes(1), 0) % 32) + 1, 1);
+    v_code := v_code || substr('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', (((('x' || substr(v_rnd, i * 2 - 1, 2))::bit(8))::int % 32) + 1), 1);
   end loop;
   v_now := to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"');
 
