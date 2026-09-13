@@ -2,13 +2,13 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src * data: blob:; connect-src 'self' https://places.googleapis.com https://api.anthropic.com https://*.supabase.co wss://*.supabase.co; frame-src https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src * data: blob:; connect-src 'self' https://places.googleapis.com https://*.supabase.co wss://*.supabase.co; frame-src https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ffffff">
   <title>予約台帳 / Sổ đặt bàn</title>
-  <link rel="stylesheet" href="style.css?v=40">
+  <link rel="stylesheet" href="style.css?v=41">
 </head>
 <body>
   <!-- dinii風 細線SVGアイコン定義 -->
@@ -506,8 +506,9 @@
         <h3 class="combo-heading" data-i18n="aiHeading"></h3>
         <p class="combo-note" data-i18n="aiNote"></p>
         <div class="form-grid">
-          <div class="field span2"><label data-i18n="aiKeyLabel"></label><input type="password" id="sClaudeApiKey" placeholder="sk-ant-…" autocomplete="off"><label class="chk small-chk"><input type="checkbox" id="sClaudeShow"> <span data-i18n="showKey"></span></label></div>
+          <div class="field span2"><label data-i18n="aiKeyLabel"></label><div class="ai-server-status" id="aiServerStatus"></div></div>
           <div class="field"><label data-i18n="aiDailyLimitLabel"></label><input type="number" id="sAiDailyLimit" min="1" max="1000"></div>
+          <div class="field span3 hidden" id="aiMembers"></div>
         </div>
 
         <h3 class="combo-heading" data-i18n="googleHeading"></h3>
@@ -570,9 +571,9 @@
 
   <script src="vendor/supabase.js"></script>
   <script src="config.js?v=1"></script>
-  <script src="store.js?v=3"></script>
-  <script src="i18n.js?v=41"></script>
+  <script src="store.js?v=4"></script>
+  <script src="i18n.js?v=42"></script>
   <script src="google-place.js?v=1"></script>
-  <script src="app.js?v=44"></script>
+  <script src="app.js?v=45"></script>
 </body>
 </html>

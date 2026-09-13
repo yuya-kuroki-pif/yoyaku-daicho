@@ -260,6 +260,8 @@ function migrateState() {
   }
   if (state.settings.storePhotos !== undefined) { delete state.settings.storePhotos; changed = true; }
   if (state.settings.claudeApiKeyEnc) { delete state.settings.claudeApiKeyEnc; changed = true; }
+  if (state.settings.claudeApiKey !== undefined) { delete state.settings.claudeApiKey; changed = true; }
+  if (registry && registry.currentId) secretsPurge(registry.currentId);
   // Google 連携の初期値（未設定のときだけ。意図的に空にした設定は保持）
   if (state.settings.googlePlaceId === undefined && !state.settings.storeName) {
     Object.assign(state.settings, DEFAULT_STORE_INFO);
@@ -1982,8 +1984,8 @@ async function saveSettings() {
 const cloudSync = { resSnap: new Map(), docSnap: '', queue: Promise.resolve(), unsubscribe: null, reloadTimer: null, saving: 0, ready: false, ignoreLocal: false };
 const SECRET_KEYS = ['claudeApiKey', 'claudeApiKeyEnc'];
 function secretsKey(id) { return `yoyaku-secrets:${id}`; }
-function secretsGet(id) { try { return JSON.parse(localStorage.getItem(secretsKey(id))) || {}; } catch (e) { return {}; } }
-function secretsSet(id, obj) { localStorage.setItem(secretsKey(id), JSON.stringify(obj)); }
+/* 旧バージョンが端末に保存していた Claude キーを消す（キーはサーバー側にだけ置く） */
+function secretsPurge(id) { try { localStorage.removeItem(secretsKey(id)); } catch (e) { /* ignore */ } }
 /* クラウドに保存する設定 JSON（予約と秘密情報を除く） */
 function docOf(st) {
   const doc = JSON.parse(JSON.stringify(st));
@@ -2021,7 +2023,6 @@ async function loadCloud() {
     state = Object.assign({}, store.doc, { reservations: reservations || [] });
     if (migrateState()) await Cloud.saveDoc(id, store.name || currentStore().name, docOf(state));
   }
-  Object.assign(state.settings, secretsGet(id));
   cloudSync.resSnap = new Map(state.reservations.map((r) => [r.id, JSON.stringify(r)]));
   cloudSync.docSnap = JSON.stringify(docOf(state));
   cloudSync.ready = true;
@@ -2032,7 +2033,6 @@ async function loadCloud() {
 function saveCloud() {
   if (!cloudSync.ready) return;
   const id = registry.currentId;
-  secretsSet(id, { claudeApiKey: state.settings.claudeApiKey || '', claudeApiKeyEnc: state.settings.claudeApiKeyEnc || '' });
   const cur = new Map(state.reservations.map((r) => [r.id, JSON.stringify(r)]));
   const changed = state.reservations.filter((r) => cloudSync.resSnap.get(r.id) !== cur.get(r.id)).map((r) => JSON.parse(JSON.stringify(r)));
   const removed = [...cloudSync.resSnap.keys()].filter((k) => !cur.has(k));
@@ -2101,7 +2101,6 @@ async function syncStoresFromCloud() {
         if (!data) continue;
         await Cloud.saveDoc(s.id, s.name, docOf(data));
         await Cloud.upsertReservations(s.id, data.reservations || []);
-        secretsSet(s.id, { claudeApiKey: (data.settings || {}).claudeApiKey || '', claudeApiKeyEnc: (data.settings || {}).claudeApiKeyEnc || '' });
       }
       registry.stores = localStores.map((s) => ({ id: s.id, name: s.name }));
     } else {
@@ -2156,15 +2155,12 @@ async function doSignOut() {
 
 /* ---------- 管理者設定（店舗の管理・画像読み取り・Googleマップ連携） ---------- */
 let adminStoresWork = [];
-function getClaudeKey() { return (state.settings.claudeApiKey || '').trim(); }
 async function loadSessionKeys() { /* PIN ロック廃止に伴い不要（互換のため残す） */ }
 
 function openAdminModal() {
   adminStoresWork = registry.stores.map((s) => ({ ...s }));
   renderAdminStores();
-  document.getElementById('sClaudeApiKey').value = getClaudeKey();
-  document.getElementById('sClaudeApiKey').type = 'password';
-  document.getElementById('sClaudeShow').checked = false;
+  renderAiMembers();
   document.getElementById('sAiDailyLimit').value = state.settings.aiDailyLimit || 50;
   renderPickSummary();
   document.getElementById('sGooglePlaceId').value = state.settings.googlePlaceId || '';
@@ -2216,7 +2212,6 @@ async function saveAdmin(close = true) {
   if (cloudMode) {
     for (const s of renames) { if (s.id !== registry.currentId) { try { await Cloud.renameStore(s.id, s.name); } catch (e) { /* 次回保存時に反映 */ } } }
   }
-  state.settings.claudeApiKey = document.getElementById('sClaudeApiKey').value.trim();
   state.settings.aiDailyLimit = Math.max(1, Math.min(1000, Number(document.getElementById('sAiDailyLimit').value) || 50));
   state.settings.googlePlaceId = document.getElementById('sGooglePlaceId').value.trim();
   state.settings.googleApiKey = document.getElementById('sGoogleApiKey').value.trim();
@@ -2577,38 +2572,16 @@ function chatParseSiteCommands(text) {
 
 /* Claude に指示を解釈させる（キー設定時のみ）。応答は {actions:[...], reply:'...'} */
 async function chatAiInterpret(text) {
-  const key = getClaudeKey();
-  if (!key) return null;
+  if (!aiEnabled()) return null;
   const tables = state.tables.map((tb) => `${tb.name}(${tb.seats}席${tb.group ? '/' + tb.group : ''})`).join(', ');
   const sites = (state.sites || []).map((s) => `${s.name}:${s.enabled ? 'ON' : 'OFF'}`).join(', ');
   const courses = (state.courses || []).map((c) => c.name + (c.price ? ' ' + c.price : '')).join(', ');
   const extras = (state.settings.storeExtras || []).map((x) => `${x.label}=${x.value}`).join(', ');
   const pickCtx = await pickContextForAi(text);
-  const system = `あなたは飲食店の予約台帳の設定アシスタントです。ユーザーの日本語（またはベトナム語）の指示を、次のアクションの配列に変換して JSON だけを返してください。\n` +
-    `アクション:\n` +
-    `- {"type":"set_field","field":F,"value":文字列}  F は storeName/storeKana/storeGenre/storePhone/storeAddress/storeAccess/storeHours/storeBudget/storeBudgetLunch/storePayment/storeCatch/storeDescription/storeNote/googlePlaceId\n` +
-    `- {"type":"set_flag","flag":"showReviews"|"showGooglePhotos","value":true|false}  予約サイトでの Google 口コミ／写真の表示\n` +
-    `- {"type":"import_google"}  Google マップから店舗情報を取り込む\n- {"type":"find_place","query":店名など}  Google マップで店舗を検索して設定\n` +
-    `- {"type":"set_closed_days","days":[0-6]}  定休日（0=日曜）\n- {"type":"add_closed_date","date":"YYYY-MM-DD"} / {"type":"remove_closed_date","date":...}  臨時休業\n` +
-    `- {"type":"set_hours","open":分,"close":分}  営業時間（例 17:00 → 1020）\n` +
-    `- {"type":"table_add","name":..,"seats":n,"min":n,"group":..} / {"type":"table_update","name":..,"seats"?:n,"min"?:n,"group"?:..,"newName"?:..} / {"type":"table_delete","name":..}\n` +
-    `- {"type":"site_toggle","name":予約サイト名,"enabled":true|false}\n- {"type":"course_set","name":..,"price"?:..,"desc"?:..} / {"type":"course_delete","name":..}\n` +
-    `- {"type":"extra_set","label":項目名,"value":内容} / {"type":"extra_delete","label":..}  店舗詳細（個室・駐車場など自由項目）\n` +
-    `- {"type":"photo_list"} / {"type":"review_list"}  Google マップの写真／口コミを番号付きで一覧表示\n` +
-    `- {"type":"photo_select","use"?:[番号...(表示順)],"main"?:番号,"hide"?:[番号...],"unhide"?:[番号...],"reset"?:true}  予約サイトに出す写真の選定（番号は下の写真一覧の番号。画像が添付されていれば内容を見て選ぶ）\n` +
-    `- {"type":"review_filter","minRating"?:1-5,"sort"?:"newest"|"highest"|"lowest","limit"?:n,"keyword"?:文字列,"hide"?:[番号...],"unhide"?:[番号...],"reset"?:true}  予約サイトに出す口コミの絞り込み。低評価だけを隠す目的の指示には、Google の規約上できないと reply で説明し hide を出さない\n` +
-    `現在の状態: 店名=${state.settings.storeName || ''} / テーブル: ${tables} / 予約サイト: ${sites} / コース: ${courses} / 店舗詳細: ${extras} / 定休日=${(state.settings.closedDays || []).map((d) => WEEKDAY_CHARS[d]).join('') || 'なし'} / 今日=${todayStr()}${pickCtx.text}\n` +
-    `該当する操作が無い、または予約の登録・変更（お客様の予約）に関する指示なら {"actions":[],"reply":"理由"} を返してください。文言の改善提案を求められたら、改善した文言で set_field を提案してください。出力は {"actions":[...],"reply":"短い日本語の説明"} のみ。`;
-  const res = await fetch(CLAUDE_API_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'server-side-fallback-2026-07-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 1500, fallbacks: 'default', system, output_config: { effort: 'low' }, messages: [{ role: 'user', content: pickCtx.images.some(Boolean) ? [...pickCtx.images.map((im, i) => im ? [{ type: 'text', text: `写真 ${i + 1}:` }, { type: 'image', source: { type: 'base64', media_type: im.media_type, data: im.data } }] : []).flat(), { type: 'text', text }] : text }] }),
-  });
-  if (!res.ok) { let msg = `HTTP ${res.status}`; try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (err) { /* ignore */ } throw new Error(msg); }
-  const data = await res.json();
+  const context = `店名=${state.settings.storeName || ''} / テーブル: ${tables} / 予約サイト: ${sites} / コース: ${courses} / 店舗詳細: ${extras} / 定休日=${(state.settings.closedDays || []).map((d) => WEEKDAY_CHARS[d]).join('') || 'なし'}${pickCtx.text}`;
+  const data = await aiCall('chat_command', { text, context, images: pickCtx.images.filter(Boolean) });
   if (data.stop_reason === 'refusal') throw new Error(t('aiRefused'));
-  const body = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-  const m = body.match(/\{[\s\S]*\}/);
+  const m = String(data.text || '').match(/\{[\s\S]*\}/);
   if (!m) throw new Error(t('aiNoJson'));
   const parsed = JSON.parse(m[0]);
   return { actions: Array.isArray(parsed.actions) ? parsed.actions : [], reply: String(parsed.reply || '') };
@@ -3112,8 +3085,6 @@ function renderBackupNote() {
 /* ---------- チャットへの画像貼り付け（DMのスクリーンショット → 予約内容の読み取り） ----------
  * Claude の Messages API（画像入力）で、スクリーンショットから日時・人数・お名前・電話番号・コース・ご要望を抽出し、
  * 予約フォームに反映して担当者が確認・登録する。API キーは店舗設定に保存（ブラウザから直接呼び出し）。 */
-const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-const CLAUDE_MODEL = 'claude-opus-5';
 const MAX_IMAGE_PX = 1600;   // 送信前に長辺を縮小（トークン節約）
 
 function chatAppendNode(role, node) {
@@ -3148,95 +3119,73 @@ function fileToJpegDataUrl(file) {
   });
 }
 
-/* 抽出 JSON のスキーマ（構造化出力） */
-const EXTRACT_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    found: { type: 'boolean' },
-    date: { type: ['string', 'null'] },
-    time: { type: ['string', 'null'] },
-    adults: { type: ['integer', 'null'] },
-    children: { type: ['integer', 'null'] },
-    name: { type: ['string', 'null'] },
-    kana: { type: ['string', 'null'] },
-    phone: { type: ['string', 'null'] },
-    course: { type: ['string', 'null'] },
-    memo: { type: ['string', 'null'] },
-    channel: { type: ['string', 'null'] },
-    missing: { type: 'array', items: { type: 'string' } },
-    notes: { type: 'string' },
-  },
-  required: ['found', 'date', 'time', 'adults', 'children', 'name', 'kana', 'phone', 'course', 'memo', 'channel', 'missing', 'notes'],
-};
-
-function extractSystemPrompt() {
-  const today = todayStr();
-  const wd = dict().weekdays[new Date().getDay()];
-  const courses = (state.courses || []).map((c) => c.name).join(' / ') || 'なし';
-  return `あなたは飲食店「${state.settings.storeName || ''}」の予約台帳アシスタントです。` +
-    `お客様とのDM（Instagram・LINE・メール等）のスクリーンショットから、予約に必要な情報を読み取り、指定のJSONだけを返してください。\n` +
-    `今日は ${today}（${wd}曜日）です。「明日」「来週金曜」などの相対表現は今日を基準に YYYY-MM-DD に変換してください。年が書かれていない日付は、今日以降で最も近い日付にしてください。\n` +
-    `営業時間は ${fmtTime(state.settings.openMin)}〜${fmtTime(state.settings.closeMin)}。時間は 24時間表記の HH:MM（例 19:00）。「夜7時」は 19:00 です。\n` +
-    `人数は大人と子供に分け、区別が無ければ全員を adults にしてください。コースは店舗のコース名（${courses}）に一致する場合のみその名前を、無ければ null。\n` +
-    `memo にはアレルギー・席の希望・お祝い等の要望を短くまとめ、channel には DM の媒体名（Instagram / LINE / メール 等、不明なら null）。\n` +
-    `読み取れない項目は null にし、missing に項目名（date/time/adults/name/phone）を列挙。notes には判断の根拠や不確かな点を日本語で1〜2文。\n` +
-    `予約に関する情報が含まれない画像なら found を false にしてください。`;
-}
-
-async function callClaudeExtract(dataUrl, hintText, withSchema) {
-  const key = getClaudeKey();
-  const base64 = dataUrl.split(',')[1];
-  const body = {
-    model: CLAUDE_MODEL,
-    max_tokens: 2048,
-    fallbacks: 'default',
-    system: extractSystemPrompt(),
-    output_config: { effort: 'medium' },
-    messages: [{
-      role: 'user',
-      content: [
-        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
-        { type: 'text', text: (hintText ? `補足: ${hintText}\n` : '') + 'このスクリーンショットから予約情報を読み取って、JSONで返してください。' },
-      ],
-    }],
-  };
-  if (withSchema) body.output_config.format = { type: 'json_schema', schema: EXTRACT_SCHEMA };
-  const res = await fetch(CLAUDE_API_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'server-side-fallback-2026-07-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify(body),
-  });
+/* ---------- AI 中継（Supabase Edge Function "ai"） ----------
+ * Claude API キーはブラウザに置かず、サーバー側（Edge Function の Secret）にだけ保存する。
+ * 関数側でログイン・店舗ごとの許可（store_members）・利用上限（ai_usage）・用途と入力サイズを検証する。
+ * 開発・テスト用に、クラウド未設定のときは config.js の aiEndpoint（認証なしのモック）を使える。 */
+function aiEnabled() { return cloudMode ? cloudSync.ready : !!String((window.APP_CONFIG || {}).aiEndpoint || '').trim(); }
+async function aiCall(purpose, payload) {
+  const cfg = window.APP_CONFIG || {};
+  const headers = { 'content-type': 'application/json' };
+  let url;
+  if (cloudMode) {
+    const s = await Cloud.session();
+    if (!s) throw new Error(t('aiNeedLogin'));
+    url = `${String(cfg.supabaseUrl).replace(/\/$/, '')}/functions/v1/ai`;
+    headers.authorization = `Bearer ${s.access_token}`;
+    headers.apikey = cfg.supabaseAnonKey;
+  } else {
+    url = String(cfg.aiEndpoint || '').trim();
+    if (!url) throw new Error(t('aiNeedCloud'));
+  }
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ store: registry.currentId, lang: state.settings.lang || 'ja', today: todayStr(), purpose, ...payload }) });
+  let data = {};
+  try { data = await res.json(); } catch (e) { data = {}; }
   if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
-    try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (err) { /* ignore */ }
-    const error = new Error(msg);
-    error.status = res.status;
-    throw error;
+    const code = data.error || '';
+    const msg = code === 'forbidden' ? t('aiForbidden')
+      : code === 'daily_limit' ? t('aiLimitReached').replace('{n}', String(data.limit || ''))
+      : code === 'rate_limited' ? t('aiRateLimited')
+      : code === 'unauthorized' ? t('aiNeedLogin')
+      : code === 'not_configured' ? t('aiNotConfigured')
+      : (data.message || `${t('aiError')} HTTP ${res.status}`);
+    const err = new Error(msg);
+    err.status = res.status; err.code = code;
+    throw err;
   }
-  return res.json();
+  return data;   // { text, stop_reason, usage, remaining }
+}
+/* 管理者設定: AI の状態と、店舗ごとに AI を使えるスタッフの一覧（クラウド時のみ） */
+async function renderAiMembers() {
+  const st = document.getElementById('aiServerStatus');
+  const box = document.getElementById('aiMembers');
+  if (!st || !box) return;
+  st.textContent = cloudMode ? t('aiServerCloud') : t('aiServerLocal');
+  if (!cloudMode) { box.innerHTML = ''; box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  box.innerHTML = `<label>${esc(t('aiMembersHead'))}</label><p class="combo-note">${esc(t('aiMembersNote'))}</p><div class="ai-member-list">…</div>`;
+  let members = [];
+  try { members = await Cloud.joinStore(registry.currentId); } catch (e) { box.querySelector('.ai-member-list').textContent = `${t('cloudLoadError')} ${e.message || ''}`; return; }
+  const list = box.querySelector('.ai-member-list');
+  list.innerHTML = members.length ? members.map((m) => `<label class="ai-member chk"><input type="checkbox" data-user="${esc(m.user_id)}" ${m.ai_allowed ? 'checked' : ''}> <span>${esc(m.email || m.user_id)}</span></label>`).join('') : `<div class="empty-note">${esc(t('aiMembersEmpty'))}</div>`;
+  list.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    cb.addEventListener('change', async () => {
+      cb.disabled = true;
+      try { await Cloud.setMemberAi(registry.currentId, cb.dataset.user, cb.checked); } catch (e) { cb.checked = !cb.checked; alert(`${t('cloudLoadError')} ${e.message || ''}`); }
+      cb.disabled = false;
+    });
+  });
 }
 
-/* スクリーンショット → 予約情報（構造化出力が使えない環境では本文のJSONを解析） */
+/* スクリーンショット → 予約情報（Edge Function 経由。本文の JSON を解析） */
 async function extractReservationFromImage(dataUrl, hintText) {
-  let data;
-  try {
-    data = await callClaudeExtract(dataUrl, hintText, true);
-  } catch (e) {
-    if (e.status === 400) data = await callClaudeExtract(dataUrl, hintText, false);
-    else throw e;
-  }
+  const m = String(dataUrl).match(/^data:(image\/[a-z]+);base64,(.+)$/);
+  if (!m) throw new Error('image');
+  const data = await aiCall('extract_reservation', { images: [{ media_type: m[1], data: m[2] }], hint: hintText || '' });
   if (data.stop_reason === 'refusal') throw new Error(t('aiRefused'));
-  const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error(t('aiNoJson'));
-  return JSON.parse(m[0]);
+  const j = String(data.text || '').match(/\{[\s\S]*\}/);
+  if (!j) throw new Error(t('aiNoJson'));
+  return JSON.parse(j[0]);
 }
 
 /* 抽出結果を予約フォームの初期値に変換 */
@@ -3345,14 +3294,7 @@ async function chatHandleImages(files, hintText) {
     if (hintText) { const p = document.createElement('div'); p.textContent = hintText; wrap.appendChild(p); }
     chatAppendNode('user', wrap);
 
-    if (!getClaudeKey()) { chatAppend('bot', t('aiNeedKey')); continue; }
-    // 1日あたりの読み取り回数の上限（キーの悪用・誤操作による費用の上振れ防止）
-    const today = todayStr();
-    registry.ai = registry.ai && registry.ai.date === today ? registry.ai : { date: today, count: 0 };
-    const limit = Math.max(1, Number(state.settings.aiDailyLimit) || 50);
-    if (registry.ai.count >= limit) { chatAppend('bot', t('aiLimitReached').replace('{n}', String(limit))); continue; }
-    registry.ai.count += 1;
-    saveRegistry();
+    if (!aiEnabled()) { chatAppend('bot', t('aiNeedKey')); continue; }
     const waiting = chatAppend('bot', t('aiReading'));
     try {
       const info = await extractReservationFromImage(dataUrl, hintText);
@@ -3613,7 +3555,7 @@ async function chatSubmit() {
       reply = chatExecute(text);
       // 従来のルールで解釈できない設定系の指示は Claude に解釈させる
       const needsAi = [t('chatUnknown'), t('chatNeedTime'), t('chatNeedName'), t('chatNeedTable'), t('chatNotFound')].some((p) => reply.startsWith(p));
-      if (needsAi && getClaudeKey()) {
+      if (needsAi && aiEnabled()) {
         const waiting = chatAppend('bot', t('chatAiThinking'));
         try {
           const ai = await chatAiInterpret(text);
@@ -3790,7 +3732,6 @@ function importJsonFile(file) {
         const oldSnap = cloudSync.resSnap;
         state = data;
         migrateState();
-        Object.assign(state.settings, secretsGet(registry.currentId));
         cloudSync.resSnap = new Map([...oldSnap.keys()].map((k) => [k, '__stale__']));
         cloudSync.docSnap = '';
         save();
@@ -3910,7 +3851,6 @@ async function init() {
   document.getElementById('btnBackupNow').addEventListener('click', exportJson);
   document.getElementById('btnBackupDismiss').addEventListener('click', () => { registry.backupDismissed = todayStr(); saveRegistry(); renderBackupNote(); });
   // API キーの表示切替
-  document.getElementById('sClaudeShow').addEventListener('change', (e) => { document.getElementById('sClaudeApiKey').type = e.target.checked ? 'text' : 'password'; });
   document.getElementById('sGoogleShow').addEventListener('change', (e) => { document.getElementById('sGoogleApiKey').type = e.target.checked ? 'text' : 'password'; });
   document.getElementById('btnGoogleImport').addEventListener('click', importFromAdminInputs);
   document.getElementById('btnGoogleFind').addEventListener('click', findPlaceFromGoogle);

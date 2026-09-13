@@ -263,3 +263,78 @@ begin
 end $$;
 revoke all on function public.booking_track(text, jsonb) from public;
 grant execute on function public.booking_track(text, jsonb) to anon, authenticated;
+
+-- ---------- AI 中継関数（Edge Function "ai"）の権限と利用記録 ----------
+-- store_members: 店舗ごとのスタッフと AI 利用可否。店舗を作ったスタッフは自動で許可、他のスタッフは
+--                初回アクセス時に ai_allowed=false で登録され、許可済みスタッフが管理者設定で有効にする。
+create table if not exists public.store_members (
+  store_id    text not null references public.stores(id) on delete cascade,
+  user_id     uuid not null,
+  email       text not null default '',
+  ai_allowed  boolean not null default false,
+  created_at  timestamptz not null default now(),
+  primary key (store_id, user_id)
+);
+alter table public.store_members enable row level security;
+drop policy if exists "staff select members" on public.store_members;
+drop policy if exists "staff update members" on public.store_members;
+drop policy if exists "staff delete members" on public.store_members;
+create policy "staff select members" on public.store_members for select to authenticated using (true);
+create policy "staff update members" on public.store_members for update to authenticated using (true) with check (true);
+create policy "staff delete members" on public.store_members for delete to authenticated using (true);
+-- insert は関数経由のみ（自分自身の登録 / 店舗作成時の自動登録）
+
+-- ai_usage: AI 呼び出しの記録（利用上限の判定と費用の把握）
+create table if not exists public.ai_usage (
+  id            bigserial primary key,
+  store_id      text not null,
+  user_id       uuid not null,
+  purpose       text not null,
+  model         text,
+  input_tokens  integer not null default 0,
+  output_tokens integer not null default 0,
+  created_at    timestamptz not null default now()
+);
+create index if not exists ai_usage_store_t on public.ai_usage (store_id, created_at);
+create index if not exists ai_usage_user_t on public.ai_usage (user_id, created_at);
+alter table public.ai_usage enable row level security;
+drop policy if exists "staff select ai_usage" on public.ai_usage;
+create policy "staff select ai_usage" on public.ai_usage for select to authenticated using (true);
+-- 書き込みは Edge Function（service role）のみ
+
+-- 店舗を作成したスタッフを自動で許可
+create or replace function public.store_creator_member() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v_email text;
+begin
+  if auth.uid() is null then return new; end if;
+  select email into v_email from auth.users where id = auth.uid();
+  insert into public.store_members (store_id, user_id, email, ai_allowed)
+  values (new.id, auth.uid(), coalesce(v_email, ''), true)
+  on conflict (store_id, user_id) do nothing;
+  return new;
+end $$;
+drop trigger if exists stores_creator_member on public.stores;
+create trigger stores_creator_member after insert on public.stores for each row execute function public.store_creator_member();
+
+-- ログイン中のスタッフを店舗のメンバーとして登録（未登録なら ai_allowed=false で追加）し、その店舗のメンバー一覧を返す
+create or replace function public.ai_join_store(p_store text)
+returns setof public.store_members
+language plpgsql security definer set search_path = public as $$
+declare v_email text;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not exists (select 1 from public.stores where id = p_store) then return; end if;
+  select email into v_email from auth.users where id = auth.uid();
+  insert into public.store_members (store_id, user_id, email, ai_allowed)
+  values (p_store, auth.uid(), coalesce(v_email, ''), false)
+  on conflict (store_id, user_id) do update set email = excluded.email where public.store_members.email = '';
+  return query select * from public.store_members where store_id = p_store order by created_at;
+end $$;
+revoke all on function public.ai_join_store(text) from public;
+grant execute on function public.ai_join_store(text) to authenticated;
+
+-- 既存データの移行: 既存の店舗 × 既存のスタッフをすべて許可
+insert into public.store_members (store_id, user_id, email, ai_allowed)
+select s.id, u.id, coalesce(u.email, ''), true from public.stores s cross join auth.users u
+on conflict (store_id, user_id) do nothing;

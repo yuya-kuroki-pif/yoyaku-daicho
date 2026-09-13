@@ -82,6 +82,17 @@ const Cloud = (() => {
     return data || [];
   }
 
+  /* ---- AI 中継（Edge Function）の権限: 店舗のメンバー登録と AI 利用可否 ---- */
+  async function joinStore(storeId) {
+    const { data, error } = await client.rpc('ai_join_store', { p_store: storeId });
+    if (error) fail(error);
+    return data || [];
+  }
+  async function setMemberAi(storeId, userId, allowed) {
+    const { error } = await client.from('store_members').update({ ai_allowed: !!allowed }).eq('store_id', storeId).eq('user_id', userId);
+    if (error) fail(error);
+  }
+
   /* ---- 認証（スタッフ） ---- */
   async function session() { const { data } = await client.auth.getSession(); return data.session; }
   async function signIn(email, password) {
@@ -120,5 +131,5 @@ const Cloud = (() => {
   }
 
   return { enabled, init, listStores, loadStore, saveDoc, upsertReservations, deleteReservations, deleteStore, renameStore, subscribe,
-    track, listEvents, session, signIn, signOut, onAuth, bookingStore, bookingOccupancy, bookingCreate, bookingLookup, bookingCancel };
+    track, listEvents, joinStore, setMemberAi, session, signIn, signOut, onAuth, bookingStore, bookingOccupancy, bookingCreate, bookingLookup, bookingCancel };
 })();
