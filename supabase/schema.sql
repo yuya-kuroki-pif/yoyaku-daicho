@@ -84,7 +84,7 @@ language sql security definer set search_path = public stable as $$
   select jsonb_build_object(
     'id', s.id,
     'name', s.name,
-    'settings', coalesce(s.doc->'settings', '{}'::jsonb) - 'claudeApiKey' - 'claudeApiKeyEnc',
+    'settings', coalesce(s.doc->'settings', '{}'::jsonb) - 'claudeApiKey' - 'claudeApiKeyEnc' - 'googleApiKey',
     'tables',  coalesce(s.doc->'tables',  '[]'::jsonb),
     'sites',   coalesce(s.doc->'sites',   '[]'::jsonb),
     'courses', coalesce(s.doc->'courses', '[]'::jsonb),
@@ -338,3 +338,21 @@ grant execute on function public.ai_join_store(text) to authenticated;
 insert into public.store_members (store_id, user_id, email, ai_allowed)
 select s.id, u.id, coalesce(u.email, ''), true from public.stores s cross join auth.users u
 on conflict (store_id, user_id) do nothing;
+
+-- ---------- Google 中継関数（Edge Function "places"）のキャッシュと利用記録 ----------
+-- どちらも Edge Function（service role）だけが読み書きする（RLS 有効・ポリシーなし）
+create table if not exists public.google_cache (
+  key   text primary key,      -- details:<placeId>:<lang> / photo:<name>:<w> / search:<lang>:<q>
+  data  jsonb not null,
+  at    timestamptz not null default now()
+);
+alter table public.google_cache enable row level security;
+
+create table if not exists public.google_usage (
+  id          bigserial primary key,
+  bucket      text not null,      -- s:<storeId>（匿名・店舗ページ） / u:<userId>（スタッフ）
+  op          text not null,      -- details / photo / search
+  created_at  timestamptz not null default now()
+);
+create index if not exists google_usage_bucket_t on public.google_usage (bucket, op, created_at);
+alter table public.google_usage enable row level security;

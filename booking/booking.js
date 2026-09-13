@@ -12,7 +12,7 @@
 const LS_KEY = 'yoyaku-daicho-v1';
 const LS_REGISTRY = 'yoyaku-daicho-stores';
 const LANG_KEY = 'yoyaku-booking-lang';
-const GCACHE_KEY = 'yoyaku-google-place-cache-v4';
+const GCACHE_KEY = 'yoyaku-google-place-cache-v5';
 const MAX_GOOGLE_PHOTOS = 10;   // Places API が返す写真の上限
 const GCACHE_TTL = 6 * 60 * 60 * 1000;   // Google 取得結果のキャッシュ（6時間）
 const DUR = 120;         // 滞在想定（分）
@@ -335,12 +335,17 @@ function maxDateStr() {
   d.setMonth(d.getMonth() + MAX_MONTHS);
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
-/* ---------- Google マップ連携（Places API (New)） ---------- */
+/* ---------- Google マップ連携（Edge Function "places" 経由） ---------- */
+function storeIdForApi() {
+  if (storeParam) return storeParam;
+  try { return (JSON.parse(localStorage.getItem(LS_REGISTRY)) || {}).currentId || 'st1'; } catch (e) { return 'st1'; }
+}
 function loadGoogle(st) {
   const s = settings(st);
   const placeId = String(s.googlePlaceId || '').trim();
-  const key = String(s.googleApiKey || '').trim();
-  if (!placeId || !key) { google.status = 'none'; google.data = null; return; }
+  const base = placesBase();
+  if (!placeId || !base) { google.status = 'none'; google.data = null; return; }
+  const sid = storeIdForApi();
   const cacheId = `${placeId}|${lang}`;
   if (google.key === cacheId && google.status !== 'idle') return;
   google.key = cacheId;
@@ -349,12 +354,8 @@ function loadGoogle(st) {
     if (c && c.key === cacheId && Date.now() - c.at < GCACHE_TTL) { google.data = c.data; google.status = 'ok'; return; }
   } catch (e) { /* ignore */ }
   google.status = 'loading';
-  fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}?languageCode=${encodeURIComponent(lang)}`, {
-    headers: {
-      'X-Goog-Api-Key': key,
-      'X-Goog-FieldMask': GOOGLE_PLACE_FIELDS,
-    },
-  })
+  // 店舗情報・口コミ・写真は Edge Function 経由（Place ID はサーバー側の店舗設定から。キーはブラウザに無い）
+  fetch(`${base}?op=details&store=${encodeURIComponent(sid)}&lang=${encodeURIComponent(lang)}`)
     .then((res) => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
     .then((data) => {
       google.data = {
@@ -376,7 +377,7 @@ function loadGoogle(st) {
         // 写真は投稿者の帰属表示（authorAttributions）付きで保持する
         photos: (data.photos || []).slice(0, MAX_GOOGLE_PHOTOS).map((p) => ({
           id: p.name,
-          url: `https://places.googleapis.com/v1/${p.name}/media?maxWidthPx=900&key=${encodeURIComponent(key)}`,
+          url: placesPhotoUrl(sid, p.name, 900),
           author: p.authorAttributions?.[0]?.displayName || '',
           authorUri: safeUrl(p.authorAttributions?.[0]?.uri),
         })),

@@ -52,3 +52,16 @@ function googlePlaceToInfo(data, lang) {
   if (data.goodForChildren) info.storeKids = L.kids;
   return info;
 }
+/* ---------- Google 中継（Supabase Edge Function "places"） ----------
+ * Google の API キーはブラウザに置かず、サーバー側（Edge Function の Secret）にだけ保存する。
+ * config.js の placesEndpoint（開発・テスト用のモック）があればそれを、無ければ Supabase の関数 URL を使う。 */
+function placesBase() {
+  const cfg = window.APP_CONFIG || {};
+  const ep = String(cfg.placesEndpoint || '').trim();
+  if (ep) return ep;
+  const su = String(cfg.supabaseUrl || '').trim();
+  return su ? su.replace(/\/$/, '') + '/functions/v1/places' : '';
+}
+function placesPhotoUrl(storeId, name, w) {
+  return `${placesBase()}?op=photo&store=${encodeURIComponent(storeId)}&name=${encodeURIComponent(name)}&w=${w === 400 ? 400 : 900}`;
+}
